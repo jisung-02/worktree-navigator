@@ -111,6 +111,12 @@ export function activate(context: vscode.ExtensionContext): void {
         await provider.changeSharedFilesSyncMode(item);
       }
     ),
+    vscode.commands.registerCommand(
+      'worktreeNavigator.openLocalIgnoreFile',
+      async (item?: ProjectRootItem) => {
+        await provider.openLocalIgnoreFile(item);
+      }
+    ),
     vscode.workspace.onDidSaveTextDocument((document) => {
       if (document.uri.fsPath === registry.filePath) {
         provider.refresh();

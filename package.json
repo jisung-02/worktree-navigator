@@ -22,7 +22,8 @@
     "onCommand:worktreeNavigator.addSharedFile",
     "onCommand:worktreeNavigator.removeSharedFile",
     "onCommand:worktreeNavigator.syncSharedFiles",
-    "onCommand:worktreeNavigator.setSharedFilesSyncMode"
+    "onCommand:worktreeNavigator.setSharedFilesSyncMode",
+    "onCommand:worktreeNavigator.openLocalIgnoreFile"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -106,6 +107,11 @@
         "command": "worktreeNavigator.setSharedFilesSyncMode",
         "title": "Worktree Navigator: Set Shared Files Sync Mode",
         "icon": "$(settings-gear)"
+      },
+      {
+        "command": "worktreeNavigator.openLocalIgnoreFile",
+        "title": "Worktree Navigator: Edit Local Ignore File",
+        "icon": "$(edit)"
       }
     ],
     "viewsContainers": {
@@ -224,6 +230,16 @@
           "command": "worktreeNavigator.setSharedFilesSyncMode",
           "when": "view == worktreeNavigator.projects && viewItem == root",
           "group": "navigation@8"
+        },
+        {
+          "command": "worktreeNavigator.openLocalIgnoreFile",
+          "when": "view == worktreeNavigator.projects && viewItem == root",
+          "group": "navigation@9"
+        },
+        {
+          "command": "worktreeNavigator.openLocalIgnoreFile",
+          "when": "view == worktreeNavigator.projects && viewItem == directory",
+          "group": "navigation@4"
         },
         {
           "command": "worktreeNavigator.addSharedFile",

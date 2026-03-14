@@ -6,6 +6,7 @@ import { GitWorktreeRecord } from '../types';
 
 const execFileAsync = promisify(execFile);
 const gitRootCache = new Map<string, string>();
+const gitCommonDirCache = new Map<string, string>();
 const worktreeListCache = new Map<string, GitWorktreeRecord[]>();
 const worktreeListInflight = new Map<string, Promise<GitWorktreeRecord[]>>();
 
@@ -46,6 +47,31 @@ export async function refreshGitWorktrees(repoPath: string): Promise<GitWorktree
 export function invalidateGitWorktreeCache(): void {
   worktreeListCache.clear();
   worktreeListInflight.clear();
+}
+
+export async function getGitCommonDir(repoPath: string): Promise<string> {
+  const gitRoot = await findGitRoot(repoPath);
+  const cached = gitCommonDirCache.get(gitRoot);
+  if (cached) {
+    return cached;
+  }
+
+  const { stdout } = await execFileAsync(
+    'git',
+    ['-C', gitRoot, 'rev-parse', '--git-common-dir'],
+    {
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024
+    }
+  );
+
+  const resolved = resolveGitPath(gitRoot, stdout.trim());
+  gitCommonDirCache.set(gitRoot, resolved);
+  return resolved;
+}
+
+export async function getGitInfoExcludePath(repoPath: string): Promise<string> {
+  return path.join(await getGitCommonDir(repoPath), 'info', 'exclude');
 }
 
 async function readGitWorktreesFromGit(gitRoot: string): Promise<GitWorktreeRecord[]> {
@@ -232,6 +258,7 @@ export async function createWorktree(options: CreateWorktreeOptions): Promise<vo
   });
 
   gitRootCache.clear();
+  gitCommonDirCache.clear();
   invalidateGitWorktreeCache();
 }
 
@@ -245,6 +272,7 @@ export async function removeWorktree(repoPath: string, worktreePath: string, for
   });
 
   gitRootCache.clear();
+  gitCommonDirCache.clear();
   invalidateGitWorktreeCache();
 }
 
@@ -297,4 +325,14 @@ export function formatGitError(error: unknown): string {
   }
 
   return 'Git command failed.';
+}
+
+function resolveGitPath(gitRoot: string, gitPath: string): string {
+  if (!gitPath) {
+    return gitRoot;
+  }
+
+  return path.isAbsolute(gitPath)
+    ? gitPath
+    : path.resolve(gitRoot, gitPath);
 }

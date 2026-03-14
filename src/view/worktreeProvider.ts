@@ -1,3 +1,4 @@
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
@@ -5,6 +6,7 @@ import {
   deleteBranch,
   findGitRoot,
   formatGitError,
+  getGitInfoExcludePath,
   hasGitRepo,
   listBranches,
   readCachedGitWorktrees,
@@ -247,6 +249,30 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
     }
   }
 
+  async openLocalIgnoreFile(item?: ProjectRootItem): Promise<void> {
+    const rootPath = await this.resolveRootPathForCommand(item?.rootPath);
+    if (!rootPath) {
+      return;
+    }
+
+    try {
+      const excludePath = await getGitInfoExcludePath(rootPath);
+      await fs.mkdir(path.dirname(excludePath), { recursive: true });
+      try {
+        await fs.access(excludePath);
+      } catch {
+        await fs.writeFile(excludePath, '', 'utf8');
+      }
+
+      const document = await vscode.workspace.openTextDocument(excludePath);
+      await vscode.window.showTextDocument(document, { preview: false });
+    } catch (error) {
+      await vscode.window.showErrorMessage(
+        `Failed to open .git/info/exclude: ${formatGitError(error)}`
+      );
+    }
+  }
+
   async removeWorktreeFromDialog(item?: WorktreeItem): Promise<void> {
     const worktreePath = item?.worktreePath;
     if (!worktreePath) {
@@ -434,6 +460,39 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
   private async getRegisteredRoots(): Promise<RegisteredRoot[]> {
     return this.registry.list();
+  }
+
+  private async resolveRootPathForCommand(rootPath?: string): Promise<string | undefined> {
+    if (rootPath) {
+      return rootPath;
+    }
+
+    const workspacePath = getCurrentWorkspacePaths()[0];
+    if (!workspacePath) {
+      await vscode.window.showInformationMessage('Open a registered root or worktree first.');
+      return undefined;
+    }
+
+    const roots = await this.getRegisteredRoots();
+    for (const root of roots) {
+      try {
+        const worktrees = await readCachedGitWorktrees(root.rootPath);
+        if (
+          worktrees.some((worktree) =>
+            normalizeComparablePath(worktree.path) === normalizeComparablePath(workspacePath)
+          )
+        ) {
+          return root.rootPath;
+        }
+      } catch {
+        // ignore invalid roots while resolving the current workspace
+      }
+    }
+
+    await vscode.window.showInformationMessage(
+      'The current workspace does not match any registered root.'
+    );
+    return undefined;
   }
 
   private async getWorktreeItems(rootPath: string): Promise<TreeNode[]> {
