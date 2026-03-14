@@ -23,9 +23,7 @@ export class ProjectRootItem extends vscode.TreeItem {
       ? `${shortenPath(entry.rootPath)}  ★ current`
       : shortenPath(entry.rootPath);
     this.tooltip = buildRootTooltip(entry, isGitRepo, isCurrent);
-    this.iconPath = isGitRepo
-      ? new vscode.ThemeIcon('repo', new vscode.ThemeColor(isCurrent ? 'charts.green' : 'charts.blue'))
-      : new vscode.ThemeIcon('folder', new vscode.ThemeColor(isCurrent ? 'charts.green' : 'charts.orange'));
+    this.iconPath = getProjectRootIconPath();
     this.command = {
       command: isGitRepo
         ? 'worktreeNavigator.handleRootClick'
@@ -126,6 +124,10 @@ export class MessageItem extends vscode.TreeItem {
 }
 
 export type TreeNode = ProjectRootItem | WorktreeItem | SharedFilesGroupItem | SharedFileItem | MessageItem;
+
+function getProjectRootIconPath(): vscode.Uri {
+  return vscode.Uri.file(path.resolve(__dirname, '../../media/directory.svg'));
+}
 
 function shortenPath(fullPath: string): string {
   const home = os.homedir();
