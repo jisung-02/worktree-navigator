@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { readGitWorktrees } from '../git/worktreeService';
+import { readCachedGitWorktrees } from '../git/worktreeService';
 import { ProjectRegistry } from '../state/projectRegistry';
 import { RegisteredRoot, SharedFilesSettingsSnapshot, SharedFilesSyncMode } from '../types';
 import { normalizeComparablePath } from '../utils/pathUtils';
@@ -438,7 +438,7 @@ export class SharedFilesService {
 
   private async loadRootContext(rootPath: string): Promise<MatchedRootContext | undefined> {
     try {
-      const worktrees = await readGitWorktrees(rootPath);
+      const worktrees = await readCachedGitWorktrees(rootPath);
       const worktreePaths = worktrees.map((worktree) => worktree.path);
       return {
         root: { name: path.basename(rootPath) || rootPath, rootPath },

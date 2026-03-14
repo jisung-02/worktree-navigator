@@ -5,10 +5,50 @@ import { promisify } from 'node:util';
 import { GitWorktreeRecord } from '../types';
 
 const execFileAsync = promisify(execFile);
+const gitRootCache = new Map<string, string>();
+const worktreeListCache = new Map<string, GitWorktreeRecord[]>();
+const worktreeListInflight = new Map<string, Promise<GitWorktreeRecord[]>>();
 
 export async function readGitWorktrees(repoPath: string): Promise<GitWorktreeRecord[]> {
-  const gitRoot = await findGitRoot(repoPath);
+  return refreshGitWorktrees(repoPath);
+}
 
+export async function readCachedGitWorktrees(repoPath: string): Promise<GitWorktreeRecord[]> {
+  const gitRoot = await findGitRoot(repoPath);
+  const cached = worktreeListCache.get(gitRoot);
+  if (cached) {
+    return cached;
+  }
+
+  return refreshGitWorktrees(gitRoot);
+}
+
+export async function refreshGitWorktrees(repoPath: string): Promise<GitWorktreeRecord[]> {
+  const gitRoot = await findGitRoot(repoPath);
+  const inflight = worktreeListInflight.get(gitRoot);
+  if (inflight) {
+    return inflight;
+  }
+
+  const request = readGitWorktreesFromGit(gitRoot)
+    .then((records) => {
+      worktreeListCache.set(gitRoot, records);
+      return records;
+    })
+    .finally(() => {
+      worktreeListInflight.delete(gitRoot);
+    });
+
+  worktreeListInflight.set(gitRoot, request);
+  return request;
+}
+
+export function invalidateGitWorktreeCache(): void {
+  worktreeListCache.clear();
+  worktreeListInflight.clear();
+}
+
+async function readGitWorktreesFromGit(gitRoot: string): Promise<GitWorktreeRecord[]> {
   const { stdout } = await execFileAsync(
     'git',
     ['-C', gitRoot, 'worktree', 'list', '--porcelain', '-z'],
@@ -20,8 +60,6 @@ export async function readGitWorktrees(repoPath: string): Promise<GitWorktreeRec
 
   return parseWorktreePorcelain(stdout);
 }
-
-const gitRootCache = new Map<string, string>();
 
 export function hasGitRepo(repoPath: string): boolean {
   if (existsSync(path.join(repoPath, '.git'))) {
@@ -194,11 +232,11 @@ export async function createWorktree(options: CreateWorktreeOptions): Promise<vo
   });
 
   gitRootCache.clear();
+  invalidateGitWorktreeCache();
 }
 
 export async function removeWorktree(repoPath: string, worktreePath: string, force: boolean): Promise<void> {
   const gitRoot = await findGitRoot(repoPath);
-  const flag = force ? '--force' : '';
   const args = ['-C', gitRoot, 'worktree', 'remove', ...(force ? ['--force'] : []), worktreePath];
 
   await execFileAsync('git', args, {
@@ -207,6 +245,7 @@ export async function removeWorktree(repoPath: string, worktreePath: string, for
   });
 
   gitRootCache.clear();
+  invalidateGitWorktreeCache();
 }
 
 export async function deleteBranch(repoPath: string, branch: string, force: boolean): Promise<void> {

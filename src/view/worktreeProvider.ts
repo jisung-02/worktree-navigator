@@ -7,6 +7,8 @@ import {
   formatGitError,
   hasGitRepo,
   listBranches,
+  readCachedGitWorktrees,
+  refreshGitWorktrees,
   readGitWorktrees,
   removeWorktree
 } from '../git/worktreeService';
@@ -44,6 +46,7 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private treeView?: vscode.TreeView<TreeNode>;
   private readonly rootClickState = new Map<string, number>();
   private readonly worktreeCache = new Map<string, TreeNode[]>();
+  private readonly worktreeRefreshInFlight = new Map<string, Promise<void>>();
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<
     TreeNode | undefined | void
   >();
@@ -60,8 +63,17 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
   }
 
   refresh(element?: TreeNode): void {
-    this.worktreeCache.clear();
     this.onDidChangeTreeDataEmitter.fire(element);
+
+    const targetRootPath = getRootPathFromTreeNode(element);
+    if (targetRootPath) {
+      void this.revalidateWorktreeItems(targetRootPath);
+      return;
+    }
+
+    for (const rootPath of this.worktreeCache.keys()) {
+      void this.revalidateWorktreeItems(rootPath);
+    }
   }
 
   /**
@@ -69,13 +81,7 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
    */
   softRefresh(): void {
     for (const rootPath of this.worktreeCache.keys()) {
-      this.loadWorktreeItems(rootPath).then((fresh) => {
-        const stale = this.worktreeCache.get(rootPath);
-        if (!stale || !treeNodesEqual(stale, fresh)) {
-          this.worktreeCache.set(rootPath, fresh);
-          this.onDidChangeTreeDataEmitter.fire(undefined);
-        }
-      });
+      void this.revalidateWorktreeItems(rootPath);
     }
   }
 
@@ -132,6 +138,8 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     await this.registry.remove(rootPath);
     this.rootClickState.delete(rootPath);
+    this.worktreeCache.delete(rootPath);
+    this.worktreeRefreshInFlight.delete(rootPath);
     this.refresh();
   }
 
@@ -431,6 +439,7 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private async getWorktreeItems(rootPath: string): Promise<TreeNode[]> {
     const cached = this.worktreeCache.get(rootPath);
     if (cached) {
+      void this.revalidateWorktreeItems(rootPath);
       return cached;
     }
 
@@ -439,9 +448,11 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return items;
   }
 
-  private async loadWorktreeItems(rootPath: string): Promise<TreeNode[]> {
+  private async loadWorktreeItems(rootPath: string, useFresh = false): Promise<TreeNode[]> {
     try {
-      const worktrees = await readGitWorktrees(rootPath);
+      const worktrees = useFresh
+        ? await refreshGitWorktrees(rootPath)
+        : await readCachedGitWorktrees(rootPath);
       if (worktrees.length === 0) {
         return [
           new MessageItem(
@@ -488,6 +499,29 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
     }
   }
 
+  private async revalidateWorktreeItems(rootPath: string): Promise<void> {
+    const inflight = this.worktreeRefreshInFlight.get(rootPath);
+    if (inflight) {
+      return inflight;
+    }
+
+    const refreshPromise = this.loadWorktreeItems(rootPath, true)
+      .then((fresh) => {
+        const stale = this.worktreeCache.get(rootPath);
+        if (!stale || !treeNodesEqual(stale, fresh)) {
+          this.worktreeCache.set(rootPath, fresh);
+          this.onDidChangeTreeDataEmitter.fire(undefined);
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        this.worktreeRefreshInFlight.delete(rootPath);
+      });
+
+    this.worktreeRefreshInFlight.set(rootPath, refreshPromise);
+    return refreshPromise;
+  }
+
   private async openFolder(folderPath: string, forceNewWindow: boolean): Promise<void> {
     const openInNewWindow =
       forceNewWindow || Boolean(this.getConfig('openInNewWindow'));
@@ -523,6 +557,14 @@ function getCurrentWorkspacePaths(): string[] {
     return [];
   }
   return folders.map((f) => f.uri.fsPath);
+}
+
+function getRootPathFromTreeNode(element?: TreeNode): string | undefined {
+  if (!element) {
+    return undefined;
+  }
+
+  return 'rootPath' in element ? element.rootPath : undefined;
 }
 
 function treeNodesEqual(a: TreeNode[], b: TreeNode[]): boolean {
