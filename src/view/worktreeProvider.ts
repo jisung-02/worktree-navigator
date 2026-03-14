@@ -24,17 +24,7 @@ import {
 } from './items';
 
 function worktreeSortKey(item: WorktreeItem): number {
-  // star (main/root) → normal branch → prunable/locked → trash
-  const icon = (item.iconPath as vscode.ThemeIcon)?.id ?? '';
-  switch (icon) {
-    case 'star-full': return 0;
-    case 'home': return 1;
-    case 'git-branch': return 2;
-    case 'git-commit': return 3;
-    case 'lock': return 4;
-    case 'trash': return 5;
-    default: return 3;
-  }
+  return item.sortRank;
 }
 
 type ConfigurationKey =

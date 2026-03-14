@@ -40,6 +40,7 @@ export class WorktreeItem extends vscode.TreeItem {
   readonly rootPath: string;
   readonly worktreePath: string;
   readonly branch?: string;
+  readonly sortRank: number;
 
   constructor(rootPath: string, worktree: GitWorktreeRecord, flags: WorktreeFlags, isCurrent: boolean = false) {
     const label = path.basename(worktree.path) || worktree.path;
@@ -47,6 +48,7 @@ export class WorktreeItem extends vscode.TreeItem {
     this.rootPath = rootPath;
     this.worktreePath = worktree.path;
     this.branch = worktree.branch;
+    this.sortRank = getWorktreeSortRank(worktree, flags);
     this.id = `worktree:${rootPath}:${worktree.path}`;
     this.contextValue = 'worktree';
     this.resourceUri = vscode.Uri.file(worktree.path);
@@ -290,4 +292,31 @@ function formatSharedFilesSyncMode(syncMode: SharedFilesSyncMode): string {
     case 'off':
       return 'Off';
   }
+}
+
+function getWorktreeSortRank(
+  worktree: GitWorktreeRecord,
+  flags: WorktreeFlags
+): number {
+  if (flags.isMainWorktree) {
+    return 0;
+  }
+
+  if (flags.isRegisteredRoot) {
+    return 1;
+  }
+
+  if (worktree.locked) {
+    return 4;
+  }
+
+  if (worktree.prunable) {
+    return 5;
+  }
+
+  if (worktree.detached || worktree.bare) {
+    return 3;
+  }
+
+  return 2;
 }
