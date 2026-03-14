@@ -285,8 +285,6 @@ function formatSharedFilesSyncMode(syncMode: SharedFilesSyncMode): string {
       return 'Manual';
     case 'onCreate':
       return 'On Create';
-    case 'onOpen':
-      return 'On Open';
     case 'onCreateAndOpen':
       return 'On Create + Open';
     case 'off':

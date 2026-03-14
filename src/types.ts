@@ -21,7 +21,6 @@ export interface WorktreeFlags {
 export type SharedFilesSyncMode =
   | 'manual'
   | 'onCreate'
-  | 'onOpen'
   | 'onCreateAndOpen'
   | 'off';
 

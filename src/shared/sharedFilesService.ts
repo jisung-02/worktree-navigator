@@ -142,13 +142,8 @@ export class SharedFilesService {
           value: 'onCreate' as const
         },
         {
-          label: 'On Open',
-          description: 'Sync automatically when a worktree is opened or attached',
-          value: 'onOpen' as const
-        },
-        {
           label: 'On Create + Open',
-          description: 'Sync automatically on both creation and opening',
+          description: 'Sync automatically when a new worktree is created and later opened',
           value: 'onCreateAndOpen' as const
         },
         {
@@ -765,7 +760,6 @@ function isSharedFilesSyncMode(value: unknown): value is SharedFilesSyncMode {
   return (
     value === 'manual'
     || value === 'onCreate'
-    || value === 'onOpen'
     || value === 'onCreateAndOpen'
     || value === 'off'
   );
@@ -778,8 +772,6 @@ function shouldSyncForTrigger(
   switch (syncMode) {
     case 'onCreate':
       return trigger === 'create';
-    case 'onOpen':
-      return trigger === 'open';
     case 'onCreateAndOpen':
       return true;
     default:
@@ -788,7 +780,7 @@ function shouldSyncForTrigger(
 }
 
 function normalizeSharedFilesSyncMode(value: unknown): SharedFilesSyncMode {
-  if (value === 'auto') {
+  if (value === 'auto' || value === 'onOpen') {
     return 'onCreateAndOpen';
   }
 
@@ -803,8 +795,6 @@ function toSyncModeLabel(syncMode: SharedFilesSyncMode): string {
       return 'Manual';
     case 'onCreate':
       return 'On Create';
-    case 'onOpen':
-      return 'On Open';
     case 'onCreateAndOpen':
       return 'On Create + Open';
     case 'off':

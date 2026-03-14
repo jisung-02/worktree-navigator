@@ -291,18 +291,16 @@
           "enum": [
             "manual",
             "onCreate",
-            "onOpen",
             "onCreateAndOpen",
             "off"
           ],
           "markdownEnumDescriptions": [
             "Sync only when you run the manual sync command.",
             "Sync automatically when a new worktree is created.",
-            "Sync automatically when a worktree is opened or attached to the current window.",
             "Sync automatically on both worktree creation and opening.",
             "Disable both automatic and manual shared-file sync."
           ],
-          "description": "Controls whether registered shared files sync on create, on open, manually, or not at all."
+          "description": "Controls whether registered shared files sync on create, on create and open, manually, or not at all."
         }
       }
     }
