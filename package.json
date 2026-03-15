@@ -2,7 +2,7 @@
   "name": "worktree-navigator",
   "displayName": "Worktree Navigator",
   "description": "Register project roots and jump between their Git worktrees from a dedicated VS Code sidebar.",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "publisher": "jisung",
   "license": "MIT",
   "icon": "media/icon.png",
