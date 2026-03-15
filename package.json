@@ -2,10 +2,10 @@
   "name": "worktree-navigator",
   "displayName": "Worktree Navigator",
   "description": "Register project roots and jump between their Git worktrees from a dedicated VS Code sidebar.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "jisung",
   "license": "MIT",
-  "icon": "media/icon.svg",
+  "icon": "media/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/jisung-02/worktree-manager.git"
@@ -32,7 +32,8 @@
     "onCommand:worktreeNavigator.openLocalIgnoreFile",
     "onCommand:worktreeNavigator.revealCurrentRoot",
     "onCommand:worktreeNavigator.revealCurrentWorktree",
-    "onCommand:worktreeNavigator.openShortcutHelp"
+    "onCommand:worktreeNavigator.openShortcutHelp",
+    "onCommand:worktreeNavigator.openHelp"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -146,6 +147,11 @@
         "command": "worktreeNavigator.openShortcutHelp",
         "title": "Worktree Navigator: Open Shortcut Help",
         "icon": "$(keyboard)"
+      },
+      {
+        "command": "worktreeNavigator.openHelp",
+        "title": "Worktree Navigator: Open Help",
+        "icon": "$(question)"
       }
     ],
     "keybindings": [
@@ -208,6 +214,11 @@
         },
         {
           "command": "worktreeNavigator.openRegistryFile",
+          "when": "view == worktreeNavigator.projects",
+          "group": "navigation"
+        },
+        {
+          "command": "worktreeNavigator.openHelp",
           "when": "view == worktreeNavigator.projects",
           "group": "navigation"
         }

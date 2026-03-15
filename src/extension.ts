@@ -17,7 +17,7 @@ const VIEW_ID = 'worktreeNavigator.projects';
 export function activate(context: vscode.ExtensionContext): void {
   const registry = new ProjectRegistry(context);
   const sharedFiles = new SharedFilesService(registry);
-  const provider = new WorktreeProvider(registry, sharedFiles);
+  const provider = new WorktreeProvider(registry, sharedFiles, context.extensionUri);
   const treeView = vscode.window.createTreeView<TreeNode>(VIEW_ID, {
     treeDataProvider: provider,
     showCollapseAll: true
@@ -125,6 +125,9 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('worktreeNavigator.openShortcutHelp', async () => {
       await provider.openShortcutHelp();
+    }),
+    vscode.commands.registerCommand('worktreeNavigator.openHelp', async () => {
+      await provider.openHelp();
     }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       if (document.uri.fsPath === registry.filePath) {
