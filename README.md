@@ -20,6 +20,7 @@ Worktree Navigator는 여러 프로젝트 루트를 등록해 두고, 각 루트
 - worktree 제거 시 연결된 branch 삭제까지 선택 가능
 - 창 포커스 복귀 시 자동 새로고침
 - 루트 더블클릭으로 빠르게 열기
+- 단축키로 현재 루트 / 현재 worktree를 사이드바에서 선택 및 포커스
 - main worktree 기준 공유 파일 등록 및 다른 worktree로 동기화
 - linked worktree가 공유하는 common `.git/info/exclude` 파일 편집
 
@@ -39,23 +40,38 @@ Worktree Navigator는 여러 프로젝트 루트를 등록해 두고, 각 루트
 
 ## 명령어
 
-| 명령어                                                | 설명                                                   |
-| ----------------------------------------------------- | ------------------------------------------------------ |
-| `Worktree Navigator: Add Project Root`                | 프로젝트 루트를 등록합니다.                            |
-| `Worktree Navigator: Refresh`                         | 트리 데이터를 새로고침합니다.                          |
-| `Worktree Navigator: Edit Saved Roots`                | 저장된 루트 목록 파일을 직접 엽니다.                   |
-| `Worktree Navigator: Remove Project Root`             | 등록된 프로젝트 루트를 제거합니다.                     |
-| `Worktree Navigator: Open Project Root`               | 프로젝트 루트를 현재 창에서 엽니다.                    |
-| `Worktree Navigator: Open Project Root in New Window` | 프로젝트 루트를 새 창에서 엽니다.                      |
-| `Worktree Navigator: Open Worktree`                   | 선택한 worktree를 현재 창에서 엽니다.                  |
-| `Worktree Navigator: Open Worktree in New Window`     | 선택한 worktree를 새 창에서 엽니다.                    |
-| `Worktree Navigator: Create Worktree`                 | 새 worktree를 생성합니다.                              |
-| `Worktree Navigator: Remove Worktree`                 | worktree를 제거하고 필요하면 branch 삭제도 진행합니다. |
-| `Worktree Navigator: Add Shared File`                 | main worktree 기준 공유 파일을 등록합니다.             |
-| `Worktree Navigator: Remove Shared File`              | 등록된 공유 파일을 제거합니다.                         |
-| `Worktree Navigator: Sync Shared Files`               | 공유 파일을 수동 동기화합니다.                         |
-| `Worktree Navigator: Set Shared Files Sync Mode`      | 공유 파일 동기화 모드를 변경합니다.                    |
-| `Worktree Navigator: Edit Local Ignore File`          | main/common `.git/info/exclude` 파일을 엽니다.         |
+| 명령어                                                   | 설명                                                              |
+| -------------------------------------------------------- | ----------------------------------------------------------------- |
+| `Worktree Navigator: Add Project Root`                   | 프로젝트 루트를 등록합니다.                                       |
+| `Worktree Navigator: Refresh`                            | 트리 데이터를 새로고침합니다.                                     |
+| `Worktree Navigator: Edit Saved Roots`                   | 저장된 루트 목록 파일을 직접 엽니다.                              |
+| `Worktree Navigator: Remove Project Root`                | 등록된 프로젝트 루트를 제거합니다.                                |
+| `Worktree Navigator: Open Project Root`                  | 프로젝트 루트를 현재 창에서 엽니다.                               |
+| `Worktree Navigator: Open Project Root in New Window`    | 프로젝트 루트를 새 창에서 엽니다.                                 |
+| `Worktree Navigator: Open Worktree`                      | 선택한 worktree를 현재 창에서 엽니다.                             |
+| `Worktree Navigator: Open Worktree in New Window`        | 선택한 worktree를 새 창에서 엽니다.                               |
+| `Worktree Navigator: Create Worktree`                    | 새 worktree를 생성합니다.                                         |
+| `Worktree Navigator: Remove Worktree`                    | worktree를 제거하고 필요하면 branch 삭제도 진행합니다.            |
+| `Worktree Navigator: Add Shared File`                    | main worktree 기준 공유 파일을 등록합니다.                        |
+| `Worktree Navigator: Remove Shared File`                 | 등록된 공유 파일을 제거합니다.                                    |
+| `Worktree Navigator: Sync Shared Files`                  | 공유 파일을 수동 동기화합니다.                                    |
+| `Worktree Navigator: Set Shared Files Sync Mode`         | 공유 파일 동기화 모드를 변경합니다.                               |
+| `Worktree Navigator: Edit Local Ignore File`             | main/common `.git/info/exclude` 파일을 엽니다.                    |
+| `Worktree Navigator: Reveal Current Root in Sidebar`     | 현재 워크스페이스가 속한 프로젝트 루트를 사이드바에서 선택합니다. |
+| `Worktree Navigator: Reveal Current Worktree in Sidebar` | 현재 워크스페이스에 해당하는 worktree를 사이드바에서 선택합니다.  |
+| `Worktree Navigator: Open Shortcut Help`                 | Keyboard Shortcuts 편집기를 열어 단축키 충돌/재설정을 확인합니다. |
+
+## 기본 단축키
+
+| 동작           | macOS   | Windows / Linux |
+| -------------- | ------- | --------------- |
+| 현재 루트 선택 | `cmd+r` | `ctrl+r`        |
+
+- 단축키를 누르면 `Worktrees` 사이드바가 열리고 해당 root/worktree 항목이 실제 선택 상태로 표시됩니다.
+- `현재 루트 선택` 단축키는 한 번 누르면 현재 root를 펼치고, 현재 워크스페이스와 매치되는 root가 없으면 첫 번째 등록 root를 펼칩니다. 같은 워크스페이스에서 짧은 시간 안에 다시 누르면 이전에 펼친 root를 접은 뒤 다음 root로 내려가면서 펼칩니다.
+- root나 worktree가 선택된 상태에서 `Enter`를 누르면 해당 프로젝트 루트나 worktree를 바로 엽니다.
+- 등록된 root가 전혀 없을 때만 안내 메시지를 보여주고, 바로 Keyboard Shortcuts 화면으로 이동할 수 있습니다.
+- `cmd+r`, `ctrl+r`는 기존 VS Code/확장 단축키와 충돌할 수 있으니, 필요하면 `Worktree Navigator: Open Shortcut Help` 명령으로 바로 재바인딩할 수 있습니다.
 
 ## 설정
 

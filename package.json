@@ -23,7 +23,10 @@
     "onCommand:worktreeNavigator.removeSharedFile",
     "onCommand:worktreeNavigator.syncSharedFiles",
     "onCommand:worktreeNavigator.setSharedFilesSyncMode",
-    "onCommand:worktreeNavigator.openLocalIgnoreFile"
+    "onCommand:worktreeNavigator.openLocalIgnoreFile",
+    "onCommand:worktreeNavigator.revealCurrentRoot",
+    "onCommand:worktreeNavigator.revealCurrentWorktree",
+    "onCommand:worktreeNavigator.openShortcutHelp"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -122,6 +125,44 @@
         "command": "worktreeNavigator.openLocalIgnoreFile",
         "title": "Worktree Navigator: Edit Local Ignore File",
         "icon": "$(edit)"
+      },
+      {
+        "command": "worktreeNavigator.revealCurrentRoot",
+        "title": "Worktree Navigator: Reveal Current Root in Sidebar",
+        "icon": "$(target)"
+      },
+      {
+        "command": "worktreeNavigator.revealCurrentWorktree",
+        "title": "Worktree Navigator: Reveal Current Worktree in Sidebar",
+        "icon": "$(target)"
+      },
+      {
+        "command": "worktreeNavigator.openShortcutHelp",
+        "title": "Worktree Navigator: Open Shortcut Help",
+        "icon": "$(keyboard)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "worktreeNavigator.revealCurrentRoot",
+        "key": "ctrl+r",
+        "mac": "cmd+r",
+        "when": "workbenchState != empty"
+      },
+      {
+        "command": "worktreeNavigator.openRoot",
+        "key": "enter",
+        "when": "view == worktreeNavigator.projects && viewItem == root && listFocus"
+      },
+      {
+        "command": "worktreeNavigator.openRoot",
+        "key": "enter",
+        "when": "view == worktreeNavigator.projects && viewItem == directory && listFocus"
+      },
+      {
+        "command": "worktreeNavigator.openWorktree",
+        "key": "enter",
+        "when": "view == worktreeNavigator.projects && viewItem == worktree && listFocus"
       }
     ],
     "viewsContainers": {

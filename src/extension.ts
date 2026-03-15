@@ -117,6 +117,15 @@ export function activate(context: vscode.ExtensionContext): void {
         await provider.openLocalIgnoreFile(item);
       }
     ),
+    vscode.commands.registerCommand('worktreeNavigator.revealCurrentRoot', async () => {
+      await provider.revealCurrentRoot();
+    }),
+    vscode.commands.registerCommand('worktreeNavigator.revealCurrentWorktree', async () => {
+      await provider.revealCurrentWorktree();
+    }),
+    vscode.commands.registerCommand('worktreeNavigator.openShortcutHelp', async () => {
+      await provider.openShortcutHelp();
+    }),
     vscode.workspace.onDidSaveTextDocument((document) => {
       if (document.uri.fsPath === registry.filePath) {
         provider.refresh();

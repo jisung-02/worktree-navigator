@@ -31,6 +31,10 @@ function worktreeSortKey(item: WorktreeItem): number {
   return item.sortRank;
 }
 
+const WORKTREE_NAVIGATOR_VIEW_COMMAND = 'workbench.view.extension.worktreeNavigator';
+const OPEN_SHORTCUTS_ACTION = 'Open Keyboard Shortcuts';
+const ROOT_REVEAL_CYCLE_WINDOW_MS = 1500;
+
 type ConfigurationKey =
   | 'openInNewWindow'
   | 'doubleClickIntervalMs'
@@ -49,6 +53,13 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly rootClickState = new Map<string, number>();
   private readonly worktreeCache = new Map<string, TreeNode[]>();
   private readonly worktreeRefreshInFlight = new Map<string, Promise<void>>();
+  private rootRevealCycleState?:
+    | {
+        anchorRootPath: string;
+        selectedRootPath: string;
+        invokedAt: number;
+      }
+    | undefined;
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<
     TreeNode | undefined | void
   >();
@@ -168,6 +179,58 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     await this.sharedFiles.prepareWorktreeForOpen(item.rootPath, worktreePath);
     await this.openFolder(worktreePath, forceNewWindow);
+  }
+
+  async revealCurrentRoot(): Promise<void> {
+    const rootItems = await this.getRootItems();
+    if (rootItems.length === 0) {
+      this.rootRevealCycleState = undefined;
+      await this.showNoCurrentItemMessage('root');
+      return;
+    }
+
+    const anchorRootItem =
+      findBestPathMatch(rootItems, (item) => item.rootPath)?.item ?? rootItems[0];
+    const rootItem = this.getRootRevealTarget(rootItems, anchorRootItem);
+    await this.focusNavigatorView();
+    await this.collapsePreviouslyRevealedRoot(rootItems, rootItem);
+
+    await this.treeView?.reveal(rootItem, {
+      expand: true,
+      focus: true,
+      select: true
+    });
+    this.rootRevealCycleState = {
+      anchorRootPath: anchorRootItem.rootPath,
+      selectedRootPath: rootItem.rootPath,
+      invokedAt: Date.now()
+    };
+  }
+
+  async revealCurrentWorktree(): Promise<void> {
+    const match = await this.findCurrentWorktreeItem();
+    if (!match) {
+      await this.showNoCurrentItemMessage('worktree');
+      return;
+    }
+
+    await this.focusNavigatorView();
+    await this.treeView?.reveal(match.rootItem, {
+      expand: true,
+      focus: false,
+      select: false
+    });
+    await this.treeView?.reveal(match.worktreeItem, {
+      focus: true,
+      select: true
+    });
+  }
+
+  async openShortcutHelp(): Promise<void> {
+    await vscode.commands.executeCommand(
+      'workbench.action.openGlobalKeybindings',
+      'worktreeNavigator.revealCurrent'
+    );
   }
 
   async handleRootClick(item?: ProjectRootItem): Promise<void> {
@@ -490,7 +553,7 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
       return rootPath;
     }
 
-    const workspacePath = getCurrentWorkspacePaths()[0];
+    const workspacePath = getPreferredWorkspacePaths()[0];
     if (!workspacePath) {
       await vscode.window.showInformationMessage('Open a registered root or worktree first.');
       return undefined;
@@ -626,6 +689,114 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
       (relativePath) => new SharedFileItem(rootPath, relativePath)
     );
   }
+
+  private async focusNavigatorView(): Promise<void> {
+    await vscode.commands.executeCommand(WORKTREE_NAVIGATOR_VIEW_COMMAND);
+  }
+
+  private async getRootItems(): Promise<ProjectRootItem[]> {
+    const items = await this.getChildren();
+    return items.filter((item): item is ProjectRootItem => item instanceof ProjectRootItem);
+  }
+
+  private getRootRevealTarget(
+    rootItems: ProjectRootItem[],
+    currentRootItem: ProjectRootItem
+  ): ProjectRootItem {
+    const cycleState = this.rootRevealCycleState;
+    if (
+      !cycleState ||
+      Date.now() - cycleState.invokedAt > ROOT_REVEAL_CYCLE_WINDOW_MS ||
+      cycleState.anchorRootPath !== currentRootItem.rootPath
+    ) {
+      return currentRootItem;
+    }
+
+    const selectedIndex = rootItems.findIndex(
+      (item) => item.rootPath === cycleState.selectedRootPath
+    );
+    if (selectedIndex === -1 || rootItems.length === 0) {
+      return currentRootItem;
+    }
+
+    return rootItems[(selectedIndex + 1) % rootItems.length];
+  }
+
+  private async collapsePreviouslyRevealedRoot(
+    rootItems: ProjectRootItem[],
+    nextRootItem: ProjectRootItem
+  ): Promise<void> {
+    const previousRootPath = this.rootRevealCycleState?.selectedRootPath;
+    if (!previousRootPath || previousRootPath === nextRootItem.rootPath) {
+      return;
+    }
+
+    const previousRootItem = rootItems.find((item) => item.rootPath === previousRootPath);
+    if (!previousRootItem) {
+      return;
+    }
+
+    await this.treeView?.reveal(previousRootItem, {
+      focus: true,
+      select: true
+    });
+    await vscode.commands.executeCommand('list.collapse');
+  }
+
+  private async findCurrentWorktreeItem(): Promise<
+    { rootItem: ProjectRootItem; worktreeItem: WorktreeItem } | undefined
+  > {
+    const rootItems = await this.getRootItems();
+    let bestMatch:
+      | {
+          rootItem: ProjectRootItem;
+          worktreeItem: WorktreeItem;
+          score: MatchScore;
+        }
+      | undefined;
+
+    for (const rootItem of rootItems) {
+      const children = await this.getWorktreeItems(rootItem.rootPath);
+      const worktreeItems = children.filter(
+        (child): child is WorktreeItem => child instanceof WorktreeItem
+      );
+
+      const nextMatch = findBestPathMatch(worktreeItems, (item) => item.worktreePath);
+      if (!nextMatch) {
+        continue;
+      }
+
+      if (!bestMatch || isBetterMatch(nextMatch.score, bestMatch.score)) {
+        bestMatch = {
+          rootItem,
+          worktreeItem: nextMatch.item,
+          score: nextMatch.score
+        };
+      }
+    }
+
+    if (!bestMatch) {
+      return undefined;
+    }
+
+    return {
+      rootItem: bestMatch.rootItem,
+      worktreeItem: bestMatch.worktreeItem
+    };
+  }
+
+  private async showNoCurrentItemMessage(target: 'root' | 'worktree'): Promise<void> {
+    const detail =
+      getPreferredWorkspacePaths().length === 0
+        ? 'Open a registered root or worktree first.'
+        : target === 'root'
+          ? 'The current workspace does not match any registered project root.'
+          : 'The current workspace does not match any registered worktree.';
+    const action = await vscode.window.showInformationMessage(detail, OPEN_SHORTCUTS_ACTION);
+    if (action === OPEN_SHORTCUTS_ACTION) {
+      await this.openShortcutHelp();
+    }
+  }
 }
 
 function getCurrentWorkspacePaths(): string[] {
@@ -634,6 +805,31 @@ function getCurrentWorkspacePaths(): string[] {
     return [];
   }
   return folders.map((f) => f.uri.fsPath);
+}
+
+function getPreferredWorkspacePaths(): string[] {
+  const currentPaths = getCurrentWorkspacePaths();
+  const activePath = getActiveWorkspacePath();
+  if (!activePath) {
+    return currentPaths;
+  }
+
+  const normalizedActivePath = normalizeComparablePath(activePath);
+  return [
+    activePath,
+    ...currentPaths.filter(
+      (pathValue) => normalizeComparablePath(pathValue) !== normalizedActivePath
+    )
+  ];
+}
+
+function getActiveWorkspacePath(): string | undefined {
+  const activeUri = vscode.window.activeTextEditor?.document.uri;
+  if (!activeUri || activeUri.scheme !== 'file') {
+    return undefined;
+  }
+
+  return vscode.workspace.getWorkspaceFolder(activeUri)?.uri.fsPath;
 }
 
 function getRootPathFromTreeNode(element?: TreeNode): string | undefined {
@@ -649,4 +845,75 @@ function treeNodesEqual(a: TreeNode[], b: TreeNode[]): boolean {
     return false;
   }
   return a.every((node, i) => node.id === b[i].id && node.description === b[i].description);
+}
+
+interface MatchScore {
+  exact: boolean;
+  pathLength: number;
+  workspaceIndex: number;
+}
+
+function findBestPathMatch<T>(
+  items: T[],
+  getPath: (item: T) => string
+): { item: T; score: MatchScore } | undefined {
+  const workspacePaths = getPreferredWorkspacePaths();
+  let bestMatch: { item: T; score: MatchScore } | undefined;
+
+  for (const [workspaceIndex, workspacePath] of workspacePaths.entries()) {
+    for (const item of items) {
+      const match = matchWorkspacePath(getPath(item), workspacePath);
+      if (!match) {
+        continue;
+      }
+
+      const score: MatchScore = {
+        exact: match.exact,
+        pathLength: match.pathLength,
+        workspaceIndex
+      };
+
+      if (!bestMatch || isBetterMatch(score, bestMatch.score)) {
+        bestMatch = { item, score };
+      }
+    }
+  }
+
+  return bestMatch;
+}
+
+function matchWorkspacePath(
+  candidatePath: string,
+  workspacePath: string
+): { exact: boolean; pathLength: number } | undefined {
+  const normalizedCandidate = normalizeComparablePath(candidatePath);
+  const normalizedWorkspace = normalizeComparablePath(workspacePath);
+
+  if (normalizedCandidate === normalizedWorkspace) {
+    return {
+      exact: true,
+      pathLength: normalizedCandidate.length
+    };
+  }
+
+  if (normalizedWorkspace.startsWith(normalizedCandidate + path.sep)) {
+    return {
+      exact: false,
+      pathLength: normalizedCandidate.length
+    };
+  }
+
+  return undefined;
+}
+
+function isBetterMatch(left: MatchScore, right: MatchScore): boolean {
+  if (left.exact !== right.exact) {
+    return left.exact;
+  }
+
+  if (left.pathLength !== right.pathLength) {
+    return left.pathLength > right.pathLength;
+  }
+
+  return left.workspaceIndex < right.workspaceIndex;
 }

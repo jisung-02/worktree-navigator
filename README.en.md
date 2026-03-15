@@ -20,6 +20,7 @@ I built this because I use Git worktrees heavily at work with `Claude Code` and 
 - Optionally delete the linked branch when removing a worktree
 - Refresh automatically when the VS Code window regains focus
 - Open a root quickly with double-click
+- Select and focus the current root or current worktree from the sidebar with shortcuts
 - Register shared files from the main worktree and sync them into other worktrees
 - Edit the common `.git/info/exclude` file shared by linked worktrees
 
@@ -39,23 +40,38 @@ The activity bar container is named `Worktrees`, and the view is `Projects & Wor
 
 ## Commands
 
-| Command                                               | Description                                         |
-| ----------------------------------------------------- | --------------------------------------------------- |
-| `Worktree Navigator: Add Project Root`                | Register a project root.                            |
-| `Worktree Navigator: Refresh`                         | Refresh the tree data.                              |
-| `Worktree Navigator: Edit Saved Roots`                | Open the saved roots file directly.                 |
-| `Worktree Navigator: Remove Project Root`             | Remove a registered project root.                   |
-| `Worktree Navigator: Open Project Root`               | Open a project root in the current window.          |
-| `Worktree Navigator: Open Project Root in New Window` | Open a project root in a new window.                |
-| `Worktree Navigator: Open Worktree`                   | Open the selected worktree in the current window.   |
-| `Worktree Navigator: Open Worktree in New Window`     | Open the selected worktree in a new window.         |
-| `Worktree Navigator: Create Worktree`                 | Create a new worktree.                              |
-| `Worktree Navigator: Remove Worktree`                 | Remove a worktree and optionally delete its branch. |
-| `Worktree Navigator: Add Shared File`                 | Register a shared file from the main worktree.      |
-| `Worktree Navigator: Remove Shared File`              | Remove a registered shared file.                    |
-| `Worktree Navigator: Sync Shared Files`               | Run a manual shared-file sync.                      |
-| `Worktree Navigator: Set Shared Files Sync Mode`      | Change the shared-file sync mode.                   |
-| `Worktree Navigator: Edit Local Ignore File`          | Open the main/common `.git/info/exclude` file.      |
+| Command                                                  | Description                                                                  |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `Worktree Navigator: Add Project Root`                   | Register a project root.                                                     |
+| `Worktree Navigator: Refresh`                            | Refresh the tree data.                                                       |
+| `Worktree Navigator: Edit Saved Roots`                   | Open the saved roots file directly.                                          |
+| `Worktree Navigator: Remove Project Root`                | Remove a registered project root.                                            |
+| `Worktree Navigator: Open Project Root`                  | Open a project root in the current window.                                   |
+| `Worktree Navigator: Open Project Root in New Window`    | Open a project root in a new window.                                         |
+| `Worktree Navigator: Open Worktree`                      | Open the selected worktree in the current window.                            |
+| `Worktree Navigator: Open Worktree in New Window`        | Open the selected worktree in a new window.                                  |
+| `Worktree Navigator: Create Worktree`                    | Create a new worktree.                                                       |
+| `Worktree Navigator: Remove Worktree`                    | Remove a worktree and optionally delete its branch.                          |
+| `Worktree Navigator: Add Shared File`                    | Register a shared file from the main worktree.                               |
+| `Worktree Navigator: Remove Shared File`                 | Remove a registered shared file.                                             |
+| `Worktree Navigator: Sync Shared Files`                  | Run a manual shared-file sync.                                               |
+| `Worktree Navigator: Set Shared Files Sync Mode`         | Change the shared-file sync mode.                                            |
+| `Worktree Navigator: Edit Local Ignore File`             | Open the main/common `.git/info/exclude` file.                               |
+| `Worktree Navigator: Reveal Current Root in Sidebar`     | Select the registered project root for the current workspace in the sidebar. |
+| `Worktree Navigator: Reveal Current Worktree in Sidebar` | Select the matching worktree for the current workspace in the sidebar.       |
+| `Worktree Navigator: Open Shortcut Help`                 | Open Keyboard Shortcuts to review shortcut conflicts or rebind them.         |
+
+## Default Shortcuts
+
+| Action              | macOS   | Windows / Linux |
+| ------------------- | ------- | --------------- |
+| Reveal current root | `cmd+r` | `ctrl+r`        |
+
+- Running either shortcut opens the `Worktrees` sidebar and visually selects the matching root or worktree item.
+- `Reveal current root` expands the current root on the first press, or the first registered root when the current workspace does not match any registered root. Pressing it again within a short window for the same workspace collapses the previously expanded root and moves downward to expand the next root.
+- When a root or worktree is selected, pressing `Enter` opens that project root or worktree immediately.
+- The extension only shows guidance when no roots are registered, and offers a shortcut to open Keyboard Shortcuts.
+- `cmd+r` and `ctrl+r` can conflict with existing VS Code or extension bindings, so use `Worktree Navigator: Open Shortcut Help` to rebind them when needed.
 
 ## Settings
 
