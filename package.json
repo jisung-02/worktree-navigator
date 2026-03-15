@@ -5,6 +5,7 @@
   "version": "0.0.1",
   "publisher": "jisung",
   "license": "MIT",
+  "icon": "media/icon.svg",
   "repository": {
     "type": "git",
     "url": "https://github.com/jisung-02/worktree-manager.git"
