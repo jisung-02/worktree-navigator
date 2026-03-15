@@ -73,8 +73,7 @@ export class ProjectRegistry {
       }))
       .sort(
         (left, right) =>
-          left.name.localeCompare(right.name) ||
-          left.rootPath.localeCompare(right.rootPath)
+          left.name.localeCompare(right.name) || left.rootPath.localeCompare(right.rootPath)
       );
 
     const payload = {
@@ -106,9 +105,8 @@ function normalizeRegistry(parsed: unknown): RegisteredRoot[] {
   }
 
   return fileShape.roots
-    .filter(
-      (entry): entry is RegisteredRoot =>
-        Boolean(entry && typeof entry.rootPath === 'string')
+    .filter((entry): entry is RegisteredRoot =>
+      Boolean(entry && typeof entry.rootPath === 'string')
     )
     .map((entry) => ({
       name:
@@ -120,10 +118,5 @@ function normalizeRegistry(parsed: unknown): RegisteredRoot[] {
 }
 
 function isFileMissing(error: unknown): boolean {
-  return Boolean(
-    error &&
-      typeof error === 'object' &&
-      'code' in error &&
-      error.code === 'ENOENT'
-  );
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
 }

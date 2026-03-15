@@ -50,7 +50,7 @@ npm install -g @vscode/vsce
     "url": "https://github.com/<user>/worktree-navigator"
   },
   "license": "MIT",
-  "icon": "media/icon.png"  // 128x128 이상 PNG 파일 필요
+  "icon": "media/icon.png" // 128x128 이상 PNG 파일 필요
 }
 ```
 

@@ -1,0 +1,7 @@
+node_modules
+out
+.omx
+.vscode
+AGENTS.md
+pnpm-lock.yaml
+*.vsix

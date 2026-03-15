@@ -1,0 +1,11 @@
+.git/**
+.github/**
+.omx/**
+.vscode/**
+src/**
+node_modules/**
+AGENTS.md
+PUBLISH.md
+tsconfig.json
+pnpm-lock.yaml
+package-lock.json

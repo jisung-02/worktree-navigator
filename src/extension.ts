@@ -1,15 +1,23 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { getCurrentBranch, isGitWorktreeDir, parseWorktreePorcelain } from './git/worktreeService';
+import { getCurrentBranch, parseWorktreePorcelain } from './git/worktreeService';
+import { SharedFilesService } from './shared/sharedFilesService';
 import { ProjectRegistry } from './state/projectRegistry';
-import { ProjectRootItem, TreeNode, WorktreeItem } from './view/items';
+import {
+  ProjectRootItem,
+  SharedFileItem,
+  SharedFilesGroupItem,
+  TreeNode,
+  WorktreeItem
+} from './view/items';
 import { WorktreeProvider } from './view/worktreeProvider';
 
 const VIEW_ID = 'worktreeNavigator.projects';
 
 export function activate(context: vscode.ExtensionContext): void {
   const registry = new ProjectRegistry(context);
-  const provider = new WorktreeProvider(registry);
+  const sharedFiles = new SharedFilesService(registry);
+  const provider = new WorktreeProvider(registry, sharedFiles);
   const treeView = vscode.window.createTreeView<TreeNode>(VIEW_ID, {
     treeDataProvider: provider,
     showCollapseAll: true
@@ -79,8 +87,47 @@ export function activate(context: vscode.ExtensionContext): void {
         await provider.handleRootClick(item);
       }
     ),
+    vscode.commands.registerCommand(
+      'worktreeNavigator.addSharedFile',
+      async (item?: ProjectRootItem | SharedFilesGroupItem) => {
+        await provider.addSharedFile(item);
+      }
+    ),
+    vscode.commands.registerCommand(
+      'worktreeNavigator.removeSharedFile',
+      async (item?: ProjectRootItem | SharedFilesGroupItem | SharedFileItem) => {
+        await provider.removeSharedFile(item);
+      }
+    ),
+    vscode.commands.registerCommand(
+      'worktreeNavigator.syncSharedFiles',
+      async (item?: ProjectRootItem | SharedFilesGroupItem) => {
+        await provider.syncSharedFilesNow(item);
+      }
+    ),
+    vscode.commands.registerCommand(
+      'worktreeNavigator.setSharedFilesSyncMode',
+      async (item?: ProjectRootItem | SharedFilesGroupItem) => {
+        await provider.changeSharedFilesSyncMode(item);
+      }
+    ),
+    vscode.commands.registerCommand(
+      'worktreeNavigator.openLocalIgnoreFile',
+      async (item?: ProjectRootItem) => {
+        await provider.openLocalIgnoreFile(item);
+      }
+    ),
     vscode.workspace.onDidSaveTextDocument((document) => {
       if (document.uri.fsPath === registry.filePath) {
+        provider.refresh();
+      }
+    }),
+    vscode.workspace.onDidChangeWorkspaceFolders((event) => {
+      void sharedFiles.syncAddedWorkspaceFolders(event.added);
+      provider.refresh();
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('worktreeNavigator')) {
         provider.refresh();
       }
     }),
@@ -90,6 +137,8 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     })
   );
+
+  void sharedFiles.syncCurrentWorkspaceIfNeeded('activate');
 }
 
 export function deactivate(): void {}
@@ -118,7 +167,8 @@ async function updateWorktreeWindowTitle(): Promise<void> {
   const customName = `${parentDir}/${currentDir} (${branch})`;
 
   const config = vscode.workspace.getConfiguration('window');
-  const defaultTitle = '${dirty}${activeEditorShort}${separator}${rootName}${separator}${profileName}${separator}${appName}';
+  const defaultTitle =
+    '${dirty}${activeEditorShort}${separator}${rootName}${separator}${profileName}${separator}${appName}';
   const newTitle = defaultTitle.replace('${rootName}', customName);
 
   await config.update('title', newTitle, vscode.ConfigurationTarget.Workspace);

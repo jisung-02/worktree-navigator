@@ -5,10 +5,72 @@ import { promisify } from 'node:util';
 import { GitWorktreeRecord } from '../types';
 
 const execFileAsync = promisify(execFile);
+const gitRootCache = new Map<string, string>();
+const gitCommonDirCache = new Map<string, string>();
+const worktreeListCache = new Map<string, GitWorktreeRecord[]>();
+const worktreeListInflight = new Map<string, Promise<GitWorktreeRecord[]>>();
 
 export async function readGitWorktrees(repoPath: string): Promise<GitWorktreeRecord[]> {
-  const gitRoot = await findGitRoot(repoPath);
+  return refreshGitWorktrees(repoPath);
+}
 
+export async function readCachedGitWorktrees(repoPath: string): Promise<GitWorktreeRecord[]> {
+  const gitRoot = await findGitRoot(repoPath);
+  const cached = worktreeListCache.get(gitRoot);
+  if (cached) {
+    return cached;
+  }
+
+  return refreshGitWorktrees(gitRoot);
+}
+
+export async function refreshGitWorktrees(repoPath: string): Promise<GitWorktreeRecord[]> {
+  const gitRoot = await findGitRoot(repoPath);
+  const inflight = worktreeListInflight.get(gitRoot);
+  if (inflight) {
+    return inflight;
+  }
+
+  const request = readGitWorktreesFromGit(gitRoot)
+    .then((records) => {
+      worktreeListCache.set(gitRoot, records);
+      return records;
+    })
+    .finally(() => {
+      worktreeListInflight.delete(gitRoot);
+    });
+
+  worktreeListInflight.set(gitRoot, request);
+  return request;
+}
+
+export function invalidateGitWorktreeCache(): void {
+  worktreeListCache.clear();
+  worktreeListInflight.clear();
+}
+
+export async function getGitCommonDir(repoPath: string): Promise<string> {
+  const gitRoot = await findGitRoot(repoPath);
+  const cached = gitCommonDirCache.get(gitRoot);
+  if (cached) {
+    return cached;
+  }
+
+  const { stdout } = await execFileAsync('git', ['-C', gitRoot, 'rev-parse', '--git-common-dir'], {
+    encoding: 'utf8',
+    maxBuffer: 1024 * 1024
+  });
+
+  const resolved = resolveGitPath(gitRoot, stdout.trim());
+  gitCommonDirCache.set(gitRoot, resolved);
+  return resolved;
+}
+
+export async function getGitInfoExcludePath(repoPath: string): Promise<string> {
+  return path.join(await getGitCommonDir(repoPath), 'info', 'exclude');
+}
+
+async function readGitWorktreesFromGit(gitRoot: string): Promise<GitWorktreeRecord[]> {
   const { stdout } = await execFileAsync(
     'git',
     ['-C', gitRoot, 'worktree', 'list', '--porcelain', '-z'],
@@ -20,8 +82,6 @@ export async function readGitWorktrees(repoPath: string): Promise<GitWorktreeRec
 
   return parseWorktreePorcelain(stdout);
 }
-
-const gitRootCache = new Map<string, string>();
 
 export function hasGitRepo(repoPath: string): boolean {
   if (existsSync(path.join(repoPath, '.git'))) {
@@ -155,7 +215,9 @@ export interface CreateWorktreeOptions {
   baseBranch?: string;
 }
 
-export async function listBranches(repoPath: string): Promise<{ local: string[]; remote: string[] }> {
+export async function listBranches(
+  repoPath: string
+): Promise<{ local: string[]; remote: string[] }> {
   const gitRoot = await findGitRoot(repoPath);
 
   const [localResult, remoteResult] = await Promise.all([
@@ -194,11 +256,16 @@ export async function createWorktree(options: CreateWorktreeOptions): Promise<vo
   });
 
   gitRootCache.clear();
+  gitCommonDirCache.clear();
+  invalidateGitWorktreeCache();
 }
 
-export async function removeWorktree(repoPath: string, worktreePath: string, force: boolean): Promise<void> {
+export async function removeWorktree(
+  repoPath: string,
+  worktreePath: string,
+  force: boolean
+): Promise<void> {
   const gitRoot = await findGitRoot(repoPath);
-  const flag = force ? '--force' : '';
   const args = ['-C', gitRoot, 'worktree', 'remove', ...(force ? ['--force'] : []), worktreePath];
 
   await execFileAsync('git', args, {
@@ -207,9 +274,15 @@ export async function removeWorktree(repoPath: string, worktreePath: string, for
   });
 
   gitRootCache.clear();
+  gitCommonDirCache.clear();
+  invalidateGitWorktreeCache();
 }
 
-export async function deleteBranch(repoPath: string, branch: string, force: boolean): Promise<void> {
+export async function deleteBranch(
+  repoPath: string,
+  branch: string,
+  force: boolean
+): Promise<void> {
   const gitRoot = await findGitRoot(repoPath);
   const flag = force ? '-D' : '-d';
   await execFileAsync('git', ['-C', gitRoot, 'branch', flag, branch], {
@@ -244,12 +317,7 @@ export function isGitWorktreeDir(dirPath: string): boolean {
 }
 
 export function formatGitError(error: unknown): string {
-  if (
-    error &&
-    typeof error === 'object' &&
-    'stderr' in error &&
-    typeof error.stderr === 'string'
-  ) {
+  if (error && typeof error === 'object' && 'stderr' in error && typeof error.stderr === 'string') {
     return error.stderr.trim() || 'Git command failed.';
   }
 
@@ -258,4 +326,12 @@ export function formatGitError(error: unknown): string {
   }
 
   return 'Git command failed.';
+}
+
+function resolveGitPath(gitRoot: string, gitPath: string): string {
+  if (!gitPath) {
+    return gitRoot;
+  }
+
+  return path.isAbsolute(gitPath) ? gitPath : path.resolve(gitRoot, gitPath);
 }
