@@ -32,7 +32,8 @@
     "onCommand:worktreeNavigator.openLocalIgnoreFile",
     "onCommand:worktreeNavigator.revealCurrentRoot",
     "onCommand:worktreeNavigator.revealCurrentWorktree",
-    "onCommand:worktreeNavigator.openShortcutHelp"
+    "onCommand:worktreeNavigator.openShortcutHelp",
+    "onCommand:worktreeNavigator.openHelp"
   ],
   "main": "./out/extension.js",
   "scripts": {
@@ -146,6 +147,11 @@
         "command": "worktreeNavigator.openShortcutHelp",
         "title": "Worktree Navigator: Open Shortcut Help",
         "icon": "$(keyboard)"
+      },
+      {
+        "command": "worktreeNavigator.openHelp",
+        "title": "Worktree Navigator: Open Help",
+        "icon": "$(question)"
       }
     ],
     "keybindings": [
@@ -208,6 +214,11 @@
         },
         {
           "command": "worktreeNavigator.openRegistryFile",
+          "when": "view == worktreeNavigator.projects",
+          "group": "navigation"
+        },
+        {
+          "command": "worktreeNavigator.openHelp",
           "when": "view == worktreeNavigator.projects",
           "group": "navigation"
         }

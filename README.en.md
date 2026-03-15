@@ -31,6 +31,7 @@ The activity bar container is named `Worktrees`, and the view is `Projects & Wor
 - Add a root
 - Refresh the tree
 - Edit the saved roots file directly
+- Open the hierarchical help menu
 - Open a project root in the current window or a new window
 - Open a worktree in the current window or a new window
 - Create and remove worktrees
@@ -60,6 +61,13 @@ The activity bar container is named `Worktrees`, and the view is `Projects & Wor
 | `Worktree Navigator: Reveal Current Root in Sidebar`     | Select the registered project root for the current workspace in the sidebar. |
 | `Worktree Navigator: Reveal Current Worktree in Sidebar` | Select the matching worktree for the current workspace in the sidebar.       |
 | `Worktree Navigator: Open Shortcut Help`                 | Open Keyboard Shortcuts to review shortcut conflicts or rebind them.         |
+| `Worktree Navigator: Open Help`                          | Open a hierarchical Quick Pick help menu with feature guides and actions.    |
+
+## Help
+
+- Open help from the sidebar `?` button or by running `Worktree Navigator: Open Help`.
+- The help flow is a hierarchical Quick Pick grouped into `Start Here`, `Project Roots`, `Worktrees`, `Shared Files`, `Local Ignore`, `Shortcuts`, `Settings`, and `Docs & Reference`.
+- Each topic includes a short explanation and a direct next step such as running a related command, opening settings, or opening the README.
 
 ## Default Shortcuts
 
