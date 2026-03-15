@@ -1,143 +1,99 @@
 # VS Code Marketplace 배포 가이드
 
-Worktree Navigator 확장을 VS Code Marketplace에 배포하는 전체 과정.
+Worktree Navigator 확장을 Git 태그 기반 GitHub Actions로 배포하는 절차.
 
----
+## 현재 배포 구조
+
+- PR 생성/업데이트 시 GitHub Actions가 `pnpm lint`, `pnpm compile`, `pnpm format:check`를 자동 실행합니다.
+- `v*.*.*` 형식의 Git 태그를 push하면 release workflow가 실행됩니다.
+- release workflow는 `package.json.version`과 태그 버전이 일치하는지 확인한 뒤 VS Code Marketplace에 배포합니다.
 
 ## 사전 준비
 
-### 1. 도구 설치
-
-```bash
-npm install -g @vscode/vsce
-```
-
-### 2. Azure DevOps Personal Access Token (PAT) 발급
-
-1. https://dev.azure.com 접속 후 로그인 (Microsoft 계정)
-2. 오른쪽 상단 사용자 아이콘 > **Personal access tokens** 클릭
-3. **+ New Token** 클릭
-4. 설정:
-   - **Name**: `vsce` (아무거나)
-   - **Organization**: `All accessible organizations` 선택
-   - **Expiration**: 원하는 기간 (최대 1년)
-   - **Scopes**: 하단의 **Custom defined** 선택 후 → **Marketplace** > **Manage** 체크
-5. **Create** 클릭 → **토큰 복사해서 안전한 곳에 저장** (다시 볼 수 없음)
-
-### 3. Publisher 등록
+### 1. Marketplace publisher 준비
 
 1. https://marketplace.visualstudio.com/manage 접속
 2. **Create publisher** 클릭
-3. 입력:
-   - **ID**: 고유 식별자 (예: `chaejiseong`) — `package.json`의 `publisher`와 일치해야 함
-   - **Display Name**: 표시 이름
-4. 생성 완료
+3. Publisher ID 생성
+4. `package.json`의 `publisher`를 그 ID로 변경
 
----
+> 현재 `publisher`가 `local`이면 release workflow가 실패하도록 설정되어 있습니다.
 
-## package.json 수정
+### 2. Azure DevOps Personal Access Token (PAT) 발급
 
-배포 전에 아래 필드들을 확인/수정:
+1. https://dev.azure.com 접속 후 로그인
+2. 우측 상단 사용자 아이콘 > **Personal access tokens**
+3. **+ New Token**
+4. **Marketplace > Manage** 권한 포함
+5. 발급 후 값을 복사
 
-```jsonc
+### 3. GitHub Secret 등록
+
+GitHub 저장소의 **Settings > Secrets and variables > Actions** 에서 아래 secret을 등록합니다.
+
+- `VSCE_PAT`: Marketplace 배포용 PAT
+
+## 릴리스 방법
+
+### 1. 버전 업데이트
+
+릴리스 전 `package.json`의 `version`을 먼저 올립니다.
+
+예시:
+
+```json
 {
-  // publisher ID를 Marketplace에 등록한 것과 일치시킴
-  "publisher": "chaejiseong",
-
-  // 선택사항이지만 강력 권장
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/<user>/worktree-navigator"
-  },
-  "license": "MIT",
-  "icon": "media/icon.png" // 128x128 이상 PNG 파일 필요
+  "version": "0.1.0"
 }
 ```
 
-> **주의**: `icon`은 PNG만 가능 (SVG 불가). 128x128px 이상 권장.
-> 현재 `media/worktree.svg`가 있으므로, PNG로 변환하거나 별도 PNG 아이콘을 준비.
-
----
-
-## 빌드 및 패키징
+### 2. 로컬 검증
 
 ```bash
-# 1. 의존성 설치
 pnpm install
-
-# 2. TypeScript 컴파일
+pnpm lint
 pnpm compile
-
-# 3. VSIX 패키지 생성 (로컬 테스트용)
-vsce package
-# → worktree-navigator-0.0.1.vsix 생성됨
-
-# 4. 로컬에서 먼저 테스트
-code --install-extension worktree-navigator-0.0.1.vsix
+pnpm format:check
 ```
 
----
-
-## 배포
-
-### 방법 A: CLI로 배포 (추천)
+필요하면 로컬에서 VSIX도 만들어볼 수 있습니다.
 
 ```bash
-# 1. 로그인 (PAT 입력 프롬프트 나옴)
-vsce login <publisher-id>
-
-# 2. 배포
-vsce publish
+pnpm dlx @vscode/vsce package
+code --install-extension worktree-navigator-0.1.0.vsix
 ```
 
-### 방법 B: 버전 올리면서 배포
+### 3. 커밋 후 태그 push
 
 ```bash
-# patch: 0.0.1 → 0.0.2
-vsce publish patch
-
-# minor: 0.0.2 → 0.1.0
-vsce publish minor
-
-# major: 0.1.0 → 1.0.0
-vsce publish major
+git add package.json pnpm-lock.yaml
+git commit -m "Release v0.1.0"
+git tag v0.1.0
+git push origin main
+git push origin v0.1.0
 ```
 
-### 방법 C: VSIX 파일 직접 업로드
+### 4. GitHub Actions 자동 배포
 
-1. `vsce package`로 `.vsix` 파일 생성
-2. https://marketplace.visualstudio.com/manage 접속
-3. 확장 선택 > **Update** > `.vsix` 파일 업로드
+release workflow가 아래 순서로 실행됩니다.
 
----
+1. 의존성 설치
+2. 태그 버전과 `package.json.version` 비교
+3. `pnpm lint`
+4. `pnpm compile`
+5. `pnpm format:check`
+6. `vsce publish`
+
+태그와 버전이 다르거나, `publisher`가 아직 `local`이거나, `VSCE_PAT`가 없으면 배포는 실패합니다.
 
 ## 배포 후 확인
 
-- 배포 후 **5~10분** 정도 걸림
-- 확인: `https://marketplace.visualstudio.com/items?itemName=<publisher-id>.worktree-navigator`
-- VS Code에서 확장 탭 검색으로도 확인 가능
+- GitHub Actions 실행 로그 확인
+- Marketplace 반영까지 수 분 정도 걸릴 수 있음
+- 확인 URL: `https://marketplace.visualstudio.com/items?itemName=<publisher-id>.worktree-navigator`
 
----
+## 운영 팁
 
-## 업데이트 배포
-
-```bash
-# 버전 올리고 배포 (한 줄)
-vsce publish patch
-```
-
-`package.json`의 `version`이 자동으로 올라가고 Marketplace에 반영됨.
-
----
-
-## 체크리스트
-
-- [ ] Azure DevOps PAT 발급
-- [ ] Marketplace publisher 등록
-- [ ] `package.json`의 `publisher` 필드 수정
-- [ ] PNG 아이콘 준비 (128x128+)
-- [ ] `repository`, `license` 필드 추가
-- [ ] `pnpm compile` 성공 확인
-- [ ] `vsce package` 성공 확인
-- [ ] 로컬 VSIX 설치 테스트
-- [ ] `vsce publish` 실행
+- branch protection을 사용한다면 PR 필수 체크로 CI workflow를 지정합니다.
+- release workflow는 버전을 자동으로 올리지 않습니다. 버전 수정과 태그 생성은 릴리스 전에 직접 해야 합니다.
+- 아이콘을 Marketplace에 노출하려면 PNG 아이콘 파일을 추가하고 `package.json`의 `icon` 필드를 설정해야 합니다.

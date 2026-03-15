@@ -3,12 +3,17 @@
   "displayName": "Worktree Navigator",
   "description": "Register project roots and jump between their Git worktrees from a dedicated VS Code sidebar.",
   "version": "0.0.1",
-  "publisher": "local",
+  "publisher": "jisung",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jisung-02/worktree-manager.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
   "categories": [
-    "SCM",
+    "SCM Providers",
     "Other"
   ],
   "activationEvents": [

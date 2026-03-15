@@ -119,7 +119,8 @@ pnpm format:check
 
 - `F5`로 Extension Development Host를 실행할 수 있습니다.
 - 빌드 결과물은 `out/`에 생성됩니다.
-- Marketplace 배포는 [PUBLISH.md](./PUBLISH.md)를 참고하세요.
+- PR이 열리면 GitHub Actions가 `pnpm lint`, `pnpm compile`, `pnpm format:check`를 자동으로 실행합니다.
+- Marketplace 배포와 릴리스 절차는 [PUBLISH.md](./PUBLISH.md)를 참고하세요.
 
 ## 라이선스
 

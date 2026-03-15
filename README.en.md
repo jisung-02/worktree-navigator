@@ -119,7 +119,8 @@ pnpm format:check
 
 - Press `F5` to launch the Extension Development Host.
 - Build output is generated in `out/`.
-- See [PUBLISH.md](./PUBLISH.md) for Marketplace publishing notes.
+- GitHub Actions runs `pnpm lint`, `pnpm compile`, and `pnpm format:check` automatically for pull requests.
+- See [PUBLISH.md](./PUBLISH.md) for Marketplace release and publishing notes.
 
 ## License
 

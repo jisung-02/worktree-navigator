@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish to VS Code Marketplace
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release metadata
+        run: |
+          node <<'EOF'
+          const fs = require('node:fs');
+
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const tag = process.env.GITHUB_REF_NAME ?? '';
+          const versionFromTag = tag.startsWith('v') ? tag.slice(1) : tag;
+
+          if (!versionFromTag) {
+            throw new Error('GITHUB_REF_NAME is empty.');
+          }
+
+          if (pkg.version !== versionFromTag) {
+            throw new Error(
+              `Tag version "${versionFromTag}" does not match package.json version "${pkg.version}".`
+            );
+          }
+
+          if (!pkg.publisher || pkg.publisher === 'local') {
+            throw new Error(
+              'package.json publisher is still set to "local". Set it to your real Marketplace publisher ID before tagging a release.'
+            );
+          }
+          EOF
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Compile
+        run: pnpm compile
+
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Publish extension
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: pnpm dlx @vscode/vsce publish -p "$VSCE_PAT"
