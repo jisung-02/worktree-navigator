@@ -1,29 +1,38 @@
-import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import {
-  createWorktree,
-  deleteBranch,
-  findGitRoot,
   formatGitError,
-  getGitInfoExcludePath,
   hasGitRepo,
-  listBranches,
   readCachedGitWorktrees,
-  refreshGitWorktrees,
-  readGitWorktrees,
-  removeWorktree
+  refreshGitWorktrees
 } from '../git/worktreeService';
-import {
-  HELP_CATEGORIES,
-  HelpActionDefinition,
-  HelpCategoryDefinition,
-  HelpTopicDefinition
-} from '../help/helpContent';
 import { SharedFilesService } from '../shared/sharedFilesService';
 import { ProjectRegistry } from '../state/projectRegistry';
 import { RegisteredRoot } from '../types';
-import { normalizeComparablePath, normalizeFsPath } from '../utils/pathUtils';
+import { normalizeComparablePath } from '../utils/pathUtils';
+import {
+  addRootFromDialog,
+  ConfigurationKey,
+  ConfigurationMap,
+  handleRootClick,
+  openLocalIgnoreFile,
+  openRoot,
+  removeRoot
+} from '../commands/rootCommands';
+import {
+  createWorktreeFromDialog,
+  openWorktree,
+  removeWorktreeFromDialog
+} from '../commands/worktreeCommands';
+import {
+  addSharedFile,
+  changeSharedFilesSyncMode,
+  removeSharedFile,
+  syncSharedFilesNow
+} from '../commands/sharedFileCommands';
+import { openHelp, openShortcutHelp } from '../commands/helpCommands';
+import { revealCurrentRoot, revealCurrentWorktree } from './navigation';
+import { getCurrentWorkspacePaths } from './workspaceMatch';
 import {
   MessageItem,
   ProjectRootItem,
@@ -37,47 +46,10 @@ function worktreeSortKey(item: WorktreeItem): number {
   return item.sortRank;
 }
 
-const WORKTREE_NAVIGATOR_VIEW_COMMAND = 'workbench.view.extension.worktreeNavigator';
-const OPEN_SHORTCUTS_ACTION = 'Open Keyboard Shortcuts';
-const ROOT_REVEAL_CYCLE_WINDOW_MS = 1500;
-
-type ConfigurationKey =
-  | 'openInNewWindow'
-  | 'doubleClickIntervalMs'
-  | 'autoRefreshOnWindowFocus'
-  | 'enableRootDoubleClick';
-
-interface ConfigurationMap {
-  openInNewWindow: boolean;
-  doubleClickIntervalMs: number;
-  autoRefreshOnWindowFocus: boolean;
-  enableRootDoubleClick: boolean;
-}
-
-interface HelpCategoryPickItem extends vscode.QuickPickItem {
-  category: HelpCategoryDefinition;
-}
-
-interface HelpTopicPickItem extends vscode.QuickPickItem {
-  topic: HelpTopicDefinition;
-}
-
-interface HelpActionPickItem extends vscode.QuickPickItem {
-  action: HelpActionDefinition;
-}
-
 export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private treeView?: vscode.TreeView<TreeNode>;
-  private readonly rootClickState = new Map<string, number>();
   private readonly worktreeCache = new Map<string, TreeNode[]>();
   private readonly worktreeRefreshInFlight = new Map<string, Promise<void>>();
-  private rootRevealCycleState?:
-    | {
-        anchorRootPath: string;
-        selectedRootPath: string;
-        invokedAt: number;
-      }
-    | undefined;
   private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<
     TreeNode | undefined | void
   >();
@@ -94,28 +66,7 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this.treeView = treeView;
   }
 
-  refresh(element?: TreeNode): void {
-    this.onDidChangeTreeDataEmitter.fire(element);
-
-    const targetRootPath = getRootPathFromTreeNode(element);
-    if (targetRootPath) {
-      void this.revalidateWorktreeItems(targetRootPath);
-      return;
-    }
-
-    for (const rootPath of this.worktreeCache.keys()) {
-      void this.revalidateWorktreeItems(rootPath);
-    }
-  }
-
-  /**
-   * Stale-while-revalidate: 캐시된 데이터를 즉시 보여주고 백그라운드에서 갱신.
-   */
-  softRefresh(): void {
-    for (const rootPath of this.worktreeCache.keys()) {
-      void this.revalidateWorktreeItems(rootPath);
-    }
-  }
+  // ── TreeDataProvider ──────────────────────────────────────────────
 
   async getChildren(element?: TreeNode): Promise<TreeNode[]> {
     if (!element) {
@@ -126,7 +77,6 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
         const normalizedRoot = normalizeComparablePath(entry.rootPath);
         const isCurrent = currentFolders.some((fp) => {
           const normalizedFp = normalizeComparablePath(fp);
-          // 정확히 일치하거나, 워크스페이스가 이 root의 하위 디렉터리인 경우
           return (
             normalizedFp === normalizedRoot || normalizedFp.startsWith(normalizedRoot + path.sep)
           );
@@ -168,417 +118,25 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return undefined;
   }
 
-  async removeRoot(item?: ProjectRootItem): Promise<void> {
-    const rootPath = item?.rootPath;
-    if (!rootPath) {
+  // ── Refresh / Cache ───────────────────────────────────────────────
+
+  refresh(element?: TreeNode): void {
+    this.onDidChangeTreeDataEmitter.fire(element);
+
+    const targetRootPath = getRootPathFromTreeNode(element);
+    if (targetRootPath) {
+      void this.revalidateWorktreeItems(targetRootPath);
       return;
     }
 
-    await this.registry.remove(rootPath);
-    this.rootClickState.delete(rootPath);
-    this.worktreeCache.delete(rootPath);
-    this.worktreeRefreshInFlight.delete(rootPath);
-    this.refresh();
-  }
-
-  async openRoot(item: ProjectRootItem | undefined, forceNewWindow: boolean): Promise<void> {
-    const rootPath = item?.rootPath;
-    if (!rootPath) {
-      return;
-    }
-
-    await this.openFolder(rootPath, forceNewWindow);
-  }
-
-  async openWorktree(item: WorktreeItem | undefined, forceNewWindow: boolean): Promise<void> {
-    const worktreePath = item?.worktreePath;
-    if (!worktreePath) {
-      return;
-    }
-
-    await this.sharedFiles.prepareWorktreeForOpen(item.rootPath, worktreePath);
-    await this.openFolder(worktreePath, forceNewWindow);
-  }
-
-  async revealCurrentRoot(): Promise<void> {
-    const rootItems = await this.getRootItems();
-    if (rootItems.length === 0) {
-      this.rootRevealCycleState = undefined;
-      await this.showNoCurrentItemMessage('root');
-      return;
-    }
-
-    const anchorRootItem =
-      findBestPathMatch(rootItems, (item) => item.rootPath)?.item ?? rootItems[0];
-    const rootItem = this.getRootRevealTarget(rootItems, anchorRootItem);
-    await this.focusNavigatorView();
-    await this.collapsePreviouslyRevealedRoot(rootItems, rootItem);
-
-    await this.treeView?.reveal(rootItem, {
-      expand: true,
-      focus: true,
-      select: true
-    });
-    this.rootRevealCycleState = {
-      anchorRootPath: anchorRootItem.rootPath,
-      selectedRootPath: rootItem.rootPath,
-      invokedAt: Date.now()
-    };
-  }
-
-  async revealCurrentWorktree(): Promise<void> {
-    const match = await this.findCurrentWorktreeItem();
-    if (!match) {
-      await this.showNoCurrentItemMessage('worktree');
-      return;
-    }
-
-    await this.focusNavigatorView();
-    await this.treeView?.reveal(match.rootItem, {
-      expand: true,
-      focus: false,
-      select: false
-    });
-    await this.treeView?.reveal(match.worktreeItem, {
-      focus: true,
-      select: true
-    });
-  }
-
-  async openShortcutHelp(): Promise<void> {
-    await vscode.commands.executeCommand(
-      'workbench.action.openGlobalKeybindings',
-      'worktreeNavigator.revealCurrent'
-    );
-  }
-
-  async openHelp(): Promise<void> {
-    for (;;) {
-      const category = await this.pickHelpCategory();
-      if (!category) {
-        return;
-      }
-
-      const topic = await this.pickHelpTopic(category);
-      if (!topic) {
-        continue;
-      }
-
-      const action =
-        topic.actions.length === 1 ? topic.actions[0] : await this.pickHelpAction(category, topic);
-      if (!action) {
-        continue;
-      }
-
-      await this.runHelpAction(action);
-      return;
+    for (const rootPath of this.worktreeCache.keys()) {
+      void this.revalidateWorktreeItems(rootPath);
     }
   }
 
-  async handleRootClick(item?: ProjectRootItem): Promise<void> {
-    const rootPath = item?.rootPath;
-    if (!rootPath || !this.treeView || !item) {
-      return;
-    }
-
-    const now = Date.now();
-    const interval = Number(this.getConfig('doubleClickIntervalMs')) || 400;
-    const enableRootDoubleClick = Boolean(this.getConfig('enableRootDoubleClick'));
-    const lastClickAt = this.rootClickState.get(rootPath) || 0;
-    this.rootClickState.set(rootPath, now);
-
-    if (enableRootDoubleClick && now - lastClickAt <= interval) {
-      this.rootClickState.delete(rootPath);
-      await this.openFolder(rootPath, false);
-      return;
-    }
-
-    await this.treeView.reveal(item, {
-      expand: true,
-      focus: false,
-      select: true
-    });
-  }
-
-  async addRootFromDialog(): Promise<void> {
-    const selected = await vscode.window.showOpenDialog({
-      canSelectFiles: false,
-      canSelectFolders: true,
-      canSelectMany: false,
-      openLabel: 'Register Project Root'
-    });
-
-    if (!selected?.length) {
-      return;
-    }
-
-    const normalized = await normalizeFsPath(selected[0].fsPath);
-    const roots = await this.getRegisteredRoots();
-    if (roots.some((entry) => entry.rootPath === normalized)) {
-      await vscode.window.showInformationMessage('That project root is already registered.');
-      return;
-    }
-
-    await this.registry.add({
-      name: path.basename(normalized) || normalized,
-      rootPath: normalized
-    });
-
-    this.refresh();
-  }
-
-  async addSharedFile(item?: ProjectRootItem | SharedFilesGroupItem): Promise<void> {
-    if (await this.sharedFiles.addSharedFile(item?.rootPath)) {
-      this.refresh();
-    }
-  }
-
-  async removeSharedFile(
-    item?: ProjectRootItem | SharedFilesGroupItem | SharedFileItem
-  ): Promise<void> {
-    const rootPath = item?.rootPath;
-    const relativePath = item instanceof SharedFileItem ? item.relativePath : undefined;
-    if (await this.sharedFiles.removeSharedFile(rootPath, relativePath)) {
-      this.refresh();
-    }
-  }
-
-  async changeSharedFilesSyncMode(item?: ProjectRootItem | SharedFilesGroupItem): Promise<void> {
-    if (await this.sharedFiles.changeSyncMode(item?.rootPath)) {
-      this.refresh();
-    }
-  }
-
-  async syncSharedFilesNow(item?: ProjectRootItem | SharedFilesGroupItem): Promise<void> {
-    if (await this.sharedFiles.syncNow(item?.rootPath)) {
-      this.refresh();
-    }
-  }
-
-  async openLocalIgnoreFile(item?: ProjectRootItem): Promise<void> {
-    const rootPath = await this.resolveRootPathForCommand(item?.rootPath);
-    if (!rootPath) {
-      return;
-    }
-
-    try {
-      const excludePath = await getGitInfoExcludePath(rootPath);
-      await fs.mkdir(path.dirname(excludePath), { recursive: true });
-      try {
-        await fs.access(excludePath);
-      } catch {
-        await fs.writeFile(excludePath, '', 'utf8');
-      }
-
-      const document = await vscode.workspace.openTextDocument(excludePath);
-      await vscode.window.showTextDocument(document, { preview: false });
-    } catch (error) {
-      await vscode.window.showErrorMessage(
-        `Failed to open .git/info/exclude: ${formatGitError(error)}`
-      );
-    }
-  }
-
-  async removeWorktreeFromDialog(item?: WorktreeItem): Promise<void> {
-    const worktreePath = item?.worktreePath;
-    if (!worktreePath) {
-      return;
-    }
-
-    const name = path.basename(worktreePath);
-    const confirm = await vscode.window.showWarningMessage(
-      `Remove worktree "${name}"?`,
-      { modal: true, detail: `Path: ${worktreePath}` },
-      'Remove',
-      'Force Remove'
-    );
-    if (!confirm) {
-      return;
-    }
-
-    const isForce = confirm === 'Force Remove';
-    try {
-      await removeWorktree(item.rootPath, worktreePath, isForce);
-      this.refresh();
-
-      if (item.branch) {
-        const deleteBranchAction = await vscode.window.showWarningMessage(
-          `Delete local branch "${item.branch}"?`,
-          { modal: true, detail: `Worktree "${name}" has been removed.` },
-          'Delete Branch',
-          'Force Delete Branch'
-        );
-        if (
-          deleteBranchAction === 'Delete Branch' ||
-          deleteBranchAction === 'Force Delete Branch'
-        ) {
-          try {
-            await deleteBranch(
-              item.rootPath,
-              item.branch,
-              deleteBranchAction === 'Force Delete Branch'
-            );
-            await vscode.window.showInformationMessage(`Branch "${item.branch}" deleted.`);
-          } catch (branchError) {
-            await vscode.window.showErrorMessage(
-              `Failed to delete branch: ${formatGitError(branchError)}`
-            );
-          }
-        }
-      } else {
-        await vscode.window.showInformationMessage(`Worktree "${name}" removed.`);
-      }
-    } catch (error) {
-      await vscode.window.showErrorMessage(`Failed to remove worktree: ${formatGitError(error)}`);
-    }
-  }
-
-  async createWorktreeFromDialog(item?: ProjectRootItem): Promise<void> {
-    const rootPath = item?.rootPath;
-    if (!rootPath) {
-      return;
-    }
-
-    const mode = await vscode.window.showQuickPick(
-      [
-        {
-          label: '$(add) New Branch',
-          description: 'Create a new branch',
-          value: 'new' as const
-        },
-        {
-          label: '$(git-branch) Existing Branch',
-          description: 'Checkout an existing branch',
-          value: 'existing' as const
-        }
-      ],
-      { placeHolder: 'Create worktree from...' }
-    );
-    if (!mode) {
-      return;
-    }
-
-    let branch: string;
-    let createNewBranch: boolean;
-    let baseBranch: string | undefined;
-
-    if (mode.value === 'existing') {
-      const { local, remote } = await listBranches(rootPath);
-      const existingWorktrees = await readGitWorktrees(rootPath);
-      const usedBranches = new Set(existingWorktrees.map((wt) => wt.branch).filter(Boolean));
-
-      const items: vscode.QuickPickItem[] = [];
-      for (const b of local) {
-        if (!usedBranches.has(b)) {
-          items.push({ label: b, description: 'local' });
-        }
-      }
-      for (const b of remote) {
-        const short = b.replace(/^[^/]+\//, '');
-        if (!usedBranches.has(short) && !local.includes(short)) {
-          items.push({ label: b, description: 'remote' });
-        }
-      }
-
-      if (items.length === 0) {
-        await vscode.window.showInformationMessage(
-          'No available branches. All branches already have worktrees.'
-        );
-        return;
-      }
-
-      const picked = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select a branch'
-      });
-      if (!picked) {
-        return;
-      }
-
-      branch = picked.label;
-      createNewBranch = false;
-    } else {
-      const branchName = await vscode.window.showInputBox({
-        prompt: 'New branch name',
-        placeHolder: 'feature/my-branch',
-        validateInput: (value) => {
-          if (!value.trim()) {
-            return 'Branch name is required';
-          }
-          if (/\s/.test(value)) {
-            return 'Branch name cannot contain spaces';
-          }
-          return undefined;
-        }
-      });
-      if (!branchName) {
-        return;
-      }
-
-      const { local } = await listBranches(rootPath);
-      const sorted = [...local].sort((a, b) => {
-        const aMain = a === 'main' || a === 'master' ? 0 : 1;
-        const bMain = b === 'main' || b === 'master' ? 0 : 1;
-        return aMain - bMain;
-      });
-      const baseItems: vscode.QuickPickItem[] = sorted.map((b) => ({
-        label: b
-      }));
-      const basePicked = await vscode.window.showQuickPick(baseItems, {
-        placeHolder: 'Select base branch (ESC to use HEAD)'
-      });
-
-      branch = branchName;
-      createNewBranch = true;
-      baseBranch = basePicked?.label;
-    }
-
-    const gitRoot = await findGitRoot(rootPath);
-    const defaultPath = path.join(
-      path.dirname(gitRoot),
-      branch.replace(/^[^/]+\//, '').replace(/\//g, '-')
-    );
-    const worktreePath = await vscode.window.showInputBox({
-      prompt: 'Worktree directory path',
-      value: defaultPath,
-      validateInput: (value) => {
-        if (!value.trim()) {
-          return 'Path is required';
-        }
-        return undefined;
-      }
-    });
-    if (!worktreePath) {
-      return;
-    }
-
-    try {
-      await createWorktree({
-        repoPath: rootPath,
-        worktreePath,
-        branch,
-        createNewBranch,
-        baseBranch
-      });
-      this.refresh();
-      const syncedOnCreate = await this.sharedFiles.syncCreatedWorktree(rootPath, worktreePath);
-      const action = await vscode.window.showInformationMessage(
-        `Worktree created: ${path.basename(worktreePath)}`,
-        'Open',
-        'Open in New Window'
-      );
-      if (action === 'Open') {
-        if (!syncedOnCreate) {
-          await this.sharedFiles.prepareWorktreeForOpen(rootPath, worktreePath);
-        }
-        await this.openFolder(worktreePath, false);
-      } else if (action === 'Open in New Window') {
-        if (!syncedOnCreate) {
-          await this.sharedFiles.prepareWorktreeForOpen(rootPath, worktreePath);
-        }
-        await this.openFolder(worktreePath, true);
-      }
-    } catch (error) {
-      await vscode.window.showErrorMessage(`Failed to create worktree: ${formatGitError(error)}`);
+  softRefresh(): void {
+    for (const rootPath of this.worktreeCache.keys()) {
+      void this.revalidateWorktreeItems(rootPath);
     }
   }
 
@@ -586,45 +144,98 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return vscode.workspace.getConfiguration('worktreeNavigator').get<ConfigurationMap[K]>(key);
   }
 
-  private async getRegisteredRoots(): Promise<RegisteredRoot[]> {
+  // ── Command Delegation (Root) ─────────────────────────────────────
+
+  async addRootFromDialog(): Promise<void> {
+    await addRootFromDialog(this.rootCtx());
+  }
+
+  async removeRoot(item?: ProjectRootItem): Promise<void> {
+    await removeRoot(this.rootCtx(), item);
+    if (item?.rootPath) {
+      this.worktreeCache.delete(item.rootPath);
+      this.worktreeRefreshInFlight.delete(item.rootPath);
+    }
+  }
+
+  async openRoot(item: ProjectRootItem | undefined, forceNewWindow: boolean): Promise<void> {
+    await openRoot(this.rootCtx(), item, forceNewWindow);
+  }
+
+  async handleRootClick(item?: ProjectRootItem): Promise<void> {
+    await handleRootClick(this.rootCtx(), item);
+  }
+
+  async openLocalIgnoreFile(item?: ProjectRootItem): Promise<void> {
+    await openLocalIgnoreFile(this.rootCtx(), item);
+  }
+
+  // ── Command Delegation (Worktree) ─────────────────────────────────
+
+  async openWorktree(item: WorktreeItem | undefined, forceNewWindow: boolean): Promise<void> {
+    await openWorktree(this.worktreeCtx(), item, forceNewWindow);
+  }
+
+  async removeWorktreeFromDialog(item?: WorktreeItem): Promise<void> {
+    await removeWorktreeFromDialog(this.worktreeCtx(), item);
+  }
+
+  async createWorktreeFromDialog(item?: ProjectRootItem): Promise<void> {
+    await createWorktreeFromDialog(this.worktreeCtx(), item);
+  }
+
+  // ── Command Delegation (Shared Files) ─────────────────────────────
+
+  async addSharedFile(item?: ProjectRootItem | SharedFilesGroupItem): Promise<void> {
+    await addSharedFile(this.sharedFileCtx(), item);
+  }
+
+  async removeSharedFile(
+    item?: ProjectRootItem | SharedFilesGroupItem | SharedFileItem
+  ): Promise<void> {
+    await removeSharedFile(this.sharedFileCtx(), item);
+  }
+
+  async changeSharedFilesSyncMode(item?: ProjectRootItem | SharedFilesGroupItem): Promise<void> {
+    await changeSharedFilesSyncMode(this.sharedFileCtx(), item);
+  }
+
+  async syncSharedFilesNow(item?: ProjectRootItem | SharedFilesGroupItem): Promise<void> {
+    await syncSharedFilesNow(this.sharedFileCtx(), item);
+  }
+
+  // ── Command Delegation (Navigation) ───────────────────────────────
+
+  async revealCurrentRoot(): Promise<void> {
+    await revealCurrentRoot(this.navigationCtx());
+  }
+
+  async revealCurrentWorktree(): Promise<void> {
+    await revealCurrentWorktree(this.navigationCtx());
+  }
+
+  // ── Command Delegation (Help) ─────────────────────────────────────
+
+  async openShortcutHelp(): Promise<void> {
+    await openShortcutHelp();
+  }
+
+  async openHelp(): Promise<void> {
+    await openHelp(this.extensionUri);
+  }
+
+  // ── Internal Data Loading ─────────────────────────────────────────
+
+  async getRegisteredRoots(): Promise<RegisteredRoot[]> {
     return this.registry.list();
   }
 
-  private async resolveRootPathForCommand(rootPath?: string): Promise<string | undefined> {
-    if (rootPath) {
-      return rootPath;
-    }
-
-    const workspacePath = getPreferredWorkspacePaths()[0];
-    if (!workspacePath) {
-      await vscode.window.showInformationMessage('Open a registered root or worktree first.');
-      return undefined;
-    }
-
-    const roots = await this.getRegisteredRoots();
-    for (const root of roots) {
-      try {
-        const worktrees = await readCachedGitWorktrees(root.rootPath);
-        if (
-          worktrees.some(
-            (worktree) =>
-              normalizeComparablePath(worktree.path) === normalizeComparablePath(workspacePath)
-          )
-        ) {
-          return root.rootPath;
-        }
-      } catch {
-        // ignore invalid roots while resolving the current workspace
-      }
-    }
-
-    await vscode.window.showInformationMessage(
-      'The current workspace does not match any registered root.'
-    );
-    return undefined;
+  async getRootItems(): Promise<ProjectRootItem[]> {
+    const items = await this.getChildren();
+    return items.filter((item): item is ProjectRootItem => item instanceof ProjectRootItem);
   }
 
-  private async getWorktreeItems(rootPath: string): Promise<TreeNode[]> {
+  async getWorktreeItems(rootPath: string): Promise<TreeNode[]> {
     const cached = this.worktreeCache.get(rootPath);
     if (cached) {
       void this.revalidateWorktreeItems(rootPath);
@@ -635,6 +246,18 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
     this.worktreeCache.set(rootPath, items);
     return items;
   }
+
+  async openFolder(folderPath: string, forceNewWindow: boolean): Promise<void> {
+    const openInNewWindow = forceNewWindow || Boolean(this.getConfig('openInNewWindow'));
+
+    await vscode.commands.executeCommand(
+      'vscode.openFolder',
+      vscode.Uri.file(folderPath),
+      openInNewWindow
+    );
+  }
+
+  // ── Private ───────────────────────────────────────────────────────
 
   private async loadWorktreeItems(rootPath: string, useFresh = false): Promise<TreeNode[]> {
     try {
@@ -705,16 +328,6 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
     return refreshPromise;
   }
 
-  private async openFolder(folderPath: string, forceNewWindow: boolean): Promise<void> {
-    const openInNewWindow = forceNewWindow || Boolean(this.getConfig('openInNewWindow'));
-
-    await vscode.commands.executeCommand(
-      'vscode.openFolder',
-      vscode.Uri.file(folderPath),
-      openInNewWindow
-    );
-  }
-
   private async getSharedFileItems(rootPath: string): Promise<TreeNode[]> {
     const sharedFilesState = await this.sharedFiles.getViewState(rootPath);
     if (!sharedFilesState || sharedFilesState.sharedFiles.length === 0) {
@@ -732,231 +345,41 @@ export class WorktreeProvider implements vscode.TreeDataProvider<TreeNode> {
     );
   }
 
-  private async focusNavigatorView(): Promise<void> {
-    await vscode.commands.executeCommand(WORKTREE_NAVIGATOR_VIEW_COMMAND);
-  }
+  // ── Context Factories ─────────────────────────────────────────────
 
-  private async pickHelpCategory(): Promise<HelpCategoryDefinition | undefined> {
-    const items: HelpCategoryPickItem[] = HELP_CATEGORIES.map((category) => ({
-      label: category.label,
-      description: category.description,
-      detail: `${category.topics.length} topic${category.topics.length === 1 ? '' : 's'}`,
-      category
-    }));
-
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Worktree Navigator Help',
-      matchOnDescription: true,
-      matchOnDetail: true
-    });
-
-    return picked?.category;
-  }
-
-  private async pickHelpTopic(
-    category: HelpCategoryDefinition
-  ): Promise<HelpTopicDefinition | undefined> {
-    const items: HelpTopicPickItem[] = category.topics.map((topic) => ({
-      label: topic.label,
-      description: topic.description,
-      detail: topic.detail,
-      topic
-    }));
-
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: `${category.label} Help`,
-      matchOnDescription: true,
-      matchOnDetail: true
-    });
-
-    return picked?.topic;
-  }
-
-  private async pickHelpAction(
-    category: HelpCategoryDefinition,
-    topic: HelpTopicDefinition
-  ): Promise<HelpActionDefinition | undefined> {
-    const items: HelpActionPickItem[] = topic.actions.map((action) => ({
-      label: action.label,
-      description: action.description,
-      detail: topic.detail,
-      action
-    }));
-
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: `${category.label} > ${topic.label}`,
-      matchOnDescription: true,
-      matchOnDetail: true
-    });
-
-    return picked?.action;
-  }
-
-  private async runHelpAction(action: HelpActionDefinition): Promise<void> {
-    if (action.kind === 'readme') {
-      await this.openBundledReadme();
-      return;
-    }
-
-    await vscode.commands.executeCommand(action.commandId, ...(action.commandArgs ?? []));
-  }
-
-  private async openBundledReadme(): Promise<void> {
-    const preferredName = vscode.env.language.startsWith('ko') ? 'README.md' : 'README.en.md';
-    const fallbackName = preferredName === 'README.md' ? 'README.en.md' : 'README.md';
-    const candidates = [preferredName, fallbackName];
-
-    for (const fileName of candidates) {
-      const readmeUri = vscode.Uri.joinPath(this.extensionUri, fileName);
-      try {
-        await fs.access(readmeUri.fsPath);
-        const document = await vscode.workspace.openTextDocument(readmeUri);
-        await vscode.window.showTextDocument(document, { preview: false });
-        return;
-      } catch {
-        // try the fallback file next
-      }
-    }
-
-    await vscode.window.showErrorMessage('Failed to open the bundled README file.');
-  }
-
-  private async getRootItems(): Promise<ProjectRootItem[]> {
-    const items = await this.getChildren();
-    return items.filter((item): item is ProjectRootItem => item instanceof ProjectRootItem);
-  }
-
-  private getRootRevealTarget(
-    rootItems: ProjectRootItem[],
-    currentRootItem: ProjectRootItem
-  ): ProjectRootItem {
-    const cycleState = this.rootRevealCycleState;
-    if (
-      !cycleState ||
-      Date.now() - cycleState.invokedAt > ROOT_REVEAL_CYCLE_WINDOW_MS ||
-      cycleState.anchorRootPath !== currentRootItem.rootPath
-    ) {
-      return currentRootItem;
-    }
-
-    const selectedIndex = rootItems.findIndex(
-      (item) => item.rootPath === cycleState.selectedRootPath
-    );
-    if (selectedIndex === -1 || rootItems.length === 0) {
-      return currentRootItem;
-    }
-
-    return rootItems[(selectedIndex + 1) % rootItems.length];
-  }
-
-  private async collapsePreviouslyRevealedRoot(
-    rootItems: ProjectRootItem[],
-    nextRootItem: ProjectRootItem
-  ): Promise<void> {
-    const previousRootPath = this.rootRevealCycleState?.selectedRootPath;
-    if (!previousRootPath || previousRootPath === nextRootItem.rootPath) {
-      return;
-    }
-
-    const previousRootItem = rootItems.find((item) => item.rootPath === previousRootPath);
-    if (!previousRootItem) {
-      return;
-    }
-
-    await this.treeView?.reveal(previousRootItem, {
-      focus: true,
-      select: true
-    });
-    await vscode.commands.executeCommand('list.collapse');
-  }
-
-  private async findCurrentWorktreeItem(): Promise<
-    { rootItem: ProjectRootItem; worktreeItem: WorktreeItem } | undefined
-  > {
-    const rootItems = await this.getRootItems();
-    let bestMatch:
-      | {
-          rootItem: ProjectRootItem;
-          worktreeItem: WorktreeItem;
-          score: MatchScore;
-        }
-      | undefined;
-
-    for (const rootItem of rootItems) {
-      const children = await this.getWorktreeItems(rootItem.rootPath);
-      const worktreeItems = children.filter(
-        (child): child is WorktreeItem => child instanceof WorktreeItem
-      );
-
-      const nextMatch = findBestPathMatch(worktreeItems, (item) => item.worktreePath);
-      if (!nextMatch) {
-        continue;
-      }
-
-      if (!bestMatch || isBetterMatch(nextMatch.score, bestMatch.score)) {
-        bestMatch = {
-          rootItem,
-          worktreeItem: nextMatch.item,
-          score: nextMatch.score
-        };
-      }
-    }
-
-    if (!bestMatch) {
-      return undefined;
-    }
-
+  private rootCtx() {
     return {
-      rootItem: bestMatch.rootItem,
-      worktreeItem: bestMatch.worktreeItem
+      registry: this.registry,
+      treeView: this.treeView,
+      getConfig: <K extends ConfigurationKey>(key: K) => this.getConfig(key),
+      getRegisteredRoots: () => this.getRegisteredRoots(),
+      refresh: () => this.refresh(),
+      openFolder: (p: string, f: boolean) => this.openFolder(p, f)
     };
   }
 
-  private async showNoCurrentItemMessage(target: 'root' | 'worktree'): Promise<void> {
-    const detail =
-      getPreferredWorkspacePaths().length === 0
-        ? 'Open a registered root or worktree first.'
-        : target === 'root'
-          ? 'The current workspace does not match any registered project root.'
-          : 'The current workspace does not match any registered worktree.';
-    const action = await vscode.window.showInformationMessage(detail, OPEN_SHORTCUTS_ACTION);
-    if (action === OPEN_SHORTCUTS_ACTION) {
-      await this.openShortcutHelp();
-    }
-  }
-}
-
-function getCurrentWorkspacePaths(): string[] {
-  const folders = vscode.workspace.workspaceFolders;
-  if (!folders) {
-    return [];
-  }
-  return folders.map((f) => f.uri.fsPath);
-}
-
-function getPreferredWorkspacePaths(): string[] {
-  const currentPaths = getCurrentWorkspacePaths();
-  const activePath = getActiveWorkspacePath();
-  if (!activePath) {
-    return currentPaths;
+  private worktreeCtx() {
+    return {
+      sharedFiles: this.sharedFiles,
+      refresh: () => this.refresh(),
+      openFolder: (p: string, f: boolean) => this.openFolder(p, f)
+    };
   }
 
-  const normalizedActivePath = normalizeComparablePath(activePath);
-  return [
-    activePath,
-    ...currentPaths.filter(
-      (pathValue) => normalizeComparablePath(pathValue) !== normalizedActivePath
-    )
-  ];
-}
-
-function getActiveWorkspacePath(): string | undefined {
-  const activeUri = vscode.window.activeTextEditor?.document.uri;
-  if (!activeUri || activeUri.scheme !== 'file') {
-    return undefined;
+  private sharedFileCtx() {
+    return {
+      sharedFiles: this.sharedFiles,
+      refresh: () => this.refresh()
+    };
   }
 
-  return vscode.workspace.getWorkspaceFolder(activeUri)?.uri.fsPath;
+  private navigationCtx() {
+    return {
+      treeView: this.treeView,
+      getRootItems: () => this.getRootItems(),
+      getWorktreeItems: (rootPath: string) => this.getWorktreeItems(rootPath)
+    };
+  }
 }
 
 function getRootPathFromTreeNode(element?: TreeNode): string | undefined {
@@ -972,75 +395,4 @@ function treeNodesEqual(a: TreeNode[], b: TreeNode[]): boolean {
     return false;
   }
   return a.every((node, i) => node.id === b[i].id && node.description === b[i].description);
-}
-
-interface MatchScore {
-  exact: boolean;
-  pathLength: number;
-  workspaceIndex: number;
-}
-
-function findBestPathMatch<T>(
-  items: T[],
-  getPath: (item: T) => string
-): { item: T; score: MatchScore } | undefined {
-  const workspacePaths = getPreferredWorkspacePaths();
-  let bestMatch: { item: T; score: MatchScore } | undefined;
-
-  for (const [workspaceIndex, workspacePath] of workspacePaths.entries()) {
-    for (const item of items) {
-      const match = matchWorkspacePath(getPath(item), workspacePath);
-      if (!match) {
-        continue;
-      }
-
-      const score: MatchScore = {
-        exact: match.exact,
-        pathLength: match.pathLength,
-        workspaceIndex
-      };
-
-      if (!bestMatch || isBetterMatch(score, bestMatch.score)) {
-        bestMatch = { item, score };
-      }
-    }
-  }
-
-  return bestMatch;
-}
-
-function matchWorkspacePath(
-  candidatePath: string,
-  workspacePath: string
-): { exact: boolean; pathLength: number } | undefined {
-  const normalizedCandidate = normalizeComparablePath(candidatePath);
-  const normalizedWorkspace = normalizeComparablePath(workspacePath);
-
-  if (normalizedCandidate === normalizedWorkspace) {
-    return {
-      exact: true,
-      pathLength: normalizedCandidate.length
-    };
-  }
-
-  if (normalizedWorkspace.startsWith(normalizedCandidate + path.sep)) {
-    return {
-      exact: false,
-      pathLength: normalizedCandidate.length
-    };
-  }
-
-  return undefined;
-}
-
-function isBetterMatch(left: MatchScore, right: MatchScore): boolean {
-  if (left.exact !== right.exact) {
-    return left.exact;
-  }
-
-  if (left.pathLength !== right.pathLength) {
-    return left.pathLength > right.pathLength;
-  }
-
-  return left.workspaceIndex < right.workspaceIndex;
 }
